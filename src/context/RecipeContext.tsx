@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import {
   Recipe,
   ShoppingItem,
@@ -9,7 +9,7 @@ import {
 import { INITIAL_RECIPES } from '../data/seedRecipes';
 import { useAuth } from './AuthContext';
 import { db } from '../lib/firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 export interface ActiveTimer {
   id: string;
@@ -28,6 +28,7 @@ interface ToastInfo {
 }
 
 interface RecipeContextType {
+  dataSyncStatus: 'local' | 'syncing' | 'synced' | 'error';
   recipes: Recipe[];
   myRecipes: Recipe[];
   favorites: string[];
@@ -69,6 +70,15 @@ interface RecipeContextType {
   deletedRecipeCount: number;
 }
 
+interface UserDataSnapshot {
+  schemaVersion: number;
+  recipes: Recipe[];
+  favorites: string[];
+  mealPlan: DayMealPlan[];
+  shoppingList: ShoppingItem[];
+  deletedRecipeCount: number;
+}
+
 const DAYS_OF_WEEK = [
   'السبت',
   'الأحد',
@@ -88,6 +98,8 @@ const RecipeContext = createContext<RecipeContextType | undefined>(undefined);
 
 export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, firebaseUser } = useAuth();
+  const [dataSyncStatus, setDataSyncStatus] = useState<'local' | 'syncing' | 'synced' | 'error'>('local');
+  const hydratedUserRef = useRef<string | null>(null);
 
   const [recipes, setRecipes] = useState<Recipe[]>(() => {
     let custom: Recipe[] = [];
@@ -197,6 +209,156 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [selectedRecipeForDetail, setSelectedRecipeForDetail] = useState<Recipe | null>(null);
   const [selectedRecipeForPlan, setSelectedRecipeForPlan] = useState<Recipe | null>(null);
 
+  const createSnapshot = (): UserDataSnapshot => ({
+    schemaVersion: 1,
+    recipes,
+    favorites,
+    mealPlan,
+    shoppingList,
+    deletedRecipeCount,
+  });
+
+  const applySnapshot = (snapshot: Partial<UserDataSnapshot>) => {
+    if (Array.isArray(snapshot.recipes)) setRecipes(snapshot.recipes);
+    if (Array.isArray(snapshot.favorites)) setFavorites(snapshot.favorites);
+    if (Array.isArray(snapshot.mealPlan)) setMealPlan(snapshot.mealPlan);
+    if (Array.isArray(snapshot.shoppingList)) setShoppingList(snapshot.shoppingList);
+    if (typeof snapshot.deletedRecipeCount === 'number') {
+      setDeletedRecipeCount(snapshot.deletedRecipeCount);
+    }
+  };
+
+  // Hydrate a separate local/cloud snapshot for every account. This prevents
+  // data from one signed-in user appearing in another user's session.
+  useEffect(() => {
+    const uid = user?.uid;
+    if (!uid) return;
+
+    let cancelled = false;
+    const previousUid = hydratedUserRef.current;
+    hydratedUserRef.current = null;
+    setDataSyncStatus(firebaseUser?.uid === uid ? 'syncing' : 'local');
+
+    const hydrate = async () => {
+      const storageKey = `tabkhat_user_data_${uid}`;
+      let snapshot: Partial<UserDataSnapshot> | null = null;
+      let hasUnifiedCloudData = false;
+
+      try {
+        const saved = localStorage.getItem(storageKey);
+        if (saved) snapshot = JSON.parse(saved);
+      } catch {
+        localStorage.removeItem(storageKey);
+      }
+
+      if (firebaseUser?.uid === uid && db) {
+        try {
+          const cloudDoc = await getDoc(doc(db, 'userData', uid));
+          if (cloudDoc.exists()) {
+            snapshot = cloudDoc.data() as UserDataSnapshot;
+            hasUnifiedCloudData = true;
+          } else {
+            // One-time migration from the older three-document layout.
+            const [favDoc, planDoc, shopDoc] = await Promise.all([
+              getDoc(doc(db, 'favorites', uid)),
+              getDoc(doc(db, 'mealPlans', uid)),
+              getDoc(doc(db, 'shoppingList', uid)),
+            ]);
+            snapshot = {
+              ...(snapshot || {}),
+              ...(favDoc.exists() && Array.isArray(favDoc.data().ids)
+                ? { favorites: favDoc.data().ids }
+                : {}),
+              ...(planDoc.exists() && Array.isArray(planDoc.data().plan)
+                ? { mealPlan: planDoc.data().plan }
+                : {}),
+              ...(shopDoc.exists() && Array.isArray(shopDoc.data().items)
+                ? { shoppingList: shopDoc.data().items }
+                : {}),
+            };
+          }
+        } catch (error) {
+          console.warn('Could not load the unified user data snapshot:', error);
+          setDataSyncStatus('error');
+        }
+      }
+
+      if (cancelled) return;
+      const mayMigrateCurrentData = !previousUid || previousUid.startsWith('guest-');
+      const cleanAccountSnapshot: UserDataSnapshot = {
+        schemaVersion: 1,
+        recipes: INITIAL_RECIPES,
+        favorites: [],
+        mealPlan: INITIAL_EMPTY_PLAN,
+        shoppingList: [],
+        deletedRecipeCount: 0,
+      };
+      const completeSnapshot: UserDataSnapshot = {
+        ...(mayMigrateCurrentData ? createSnapshot() : cleanAccountSnapshot),
+        ...(snapshot || {}),
+        schemaVersion: 1,
+      };
+      applySnapshot(completeSnapshot);
+      localStorage.setItem(storageKey, JSON.stringify(completeSnapshot));
+      hydratedUserRef.current = uid;
+
+      if (firebaseUser?.uid === uid && db) {
+        if (!hasUnifiedCloudData) {
+          try {
+            await setDoc(doc(db, 'userData', uid), {
+              ...JSON.parse(JSON.stringify(completeSnapshot)),
+              updatedAt: serverTimestamp(),
+            });
+          } catch (error) {
+            console.warn('Could not create the unified user data snapshot:', error);
+            setDataSyncStatus('error');
+            return;
+          }
+        }
+        setDataSyncStatus('synced');
+      } else {
+        setDataSyncStatus('local');
+      }
+    };
+
+    hydrate();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.uid, firebaseUser?.uid]);
+
+  // Persist the complete user-owned state locally and, for authenticated
+  // accounts, to a single Firestore document. Debouncing keeps writes small.
+  useEffect(() => {
+    const uid = user?.uid;
+    if (!uid || hydratedUserRef.current !== uid) return;
+
+    const snapshot = createSnapshot();
+    const safeSnapshot = JSON.parse(JSON.stringify(snapshot)) as UserDataSnapshot;
+    localStorage.setItem(`tabkhat_user_data_${uid}`, JSON.stringify(safeSnapshot));
+
+    if (firebaseUser?.uid !== uid || !db) {
+      setDataSyncStatus('local');
+      return;
+    }
+
+    setDataSyncStatus('syncing');
+    const timer = window.setTimeout(async () => {
+      try {
+        await setDoc(doc(db!, 'userData', uid), {
+          ...safeSnapshot,
+          updatedAt: serverTimestamp(),
+        });
+        setDataSyncStatus('synced');
+      } catch (error) {
+        console.warn('Could not sync the unified user data snapshot:', error);
+        setDataSyncStatus('error');
+      }
+    }, 700);
+
+    return () => window.clearTimeout(timer);
+  }, [user?.uid, firebaseUser?.uid, recipes, favorites, mealPlan, shoppingList, deletedRecipeCount]);
+
   // Show Toast helper
   const showToast = (message: string, type: 'success' | 'info' | 'warning' = 'success') => {
     const id = Math.random().toString(36).substring(2, 7);
@@ -218,38 +380,6 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => {
     localStorage.setItem('tabkhat_shopping_list', JSON.stringify(shoppingList));
   }, [shoppingList]);
-
-  // Load from Firestore if user is authenticated
-  useEffect(() => {
-    const firestore = db;
-    if (!firebaseUser || !firestore) return;
-
-    const loadUserData = async () => {
-      try {
-        // Load favorites
-        const favDoc = await getDoc(doc(firestore, 'favorites', firebaseUser.uid));
-        if (favDoc.exists() && favDoc.data().ids) {
-          setFavorites(favDoc.data().ids);
-        }
-
-        // Load meal plan
-        const planDoc = await getDoc(doc(firestore, 'mealPlans', firebaseUser.uid));
-        if (planDoc.exists() && planDoc.data().plan) {
-          setMealPlan(planDoc.data().plan);
-        }
-
-        // Load shopping list
-        const shopDoc = await getDoc(doc(firestore, 'shoppingList', firebaseUser.uid));
-        if (shopDoc.exists() && shopDoc.data().items) {
-          setShoppingList(shopDoc.data().items);
-        }
-      } catch (err) {
-        console.warn('Error loading user cloud data:', err);
-      }
-    };
-
-    loadUserData();
-  }, [firebaseUser]);
 
   // Sync favorites to Firestore when changed
   const saveFavoritesToCloud = async (newFavs: string[]) => {
@@ -810,6 +940,7 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   return (
     <RecipeContext.Provider
       value={{
+        dataSyncStatus,
         recipes,
         myRecipes,
         favorites,

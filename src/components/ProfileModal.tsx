@@ -53,6 +53,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     loginWithGoogle,
     loginWithEmail,
     registerWithEmail,
+    resetPassword,
     logout,
     updatePreferences,
     updateProfileName,
@@ -62,6 +63,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   } = useAuth();
 
   const {
+    dataSyncStatus,
     recipes,
     myRecipes,
     favorites,
@@ -132,7 +134,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
       showToast('🎉 تم تسجيل الدخول بنجاح عبر حساب Google!', 'success');
     } catch (err: any) {
       console.error(err);
-      setAuthError(err.message || 'تعذر تسجيل الدخول عبر Google');
+      setAuthError(getAuthErrorMessage(err));
     }
   };
 
@@ -142,10 +144,10 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     setIsSubmitting(true);
     try {
       if (authMode === 'register') {
-        await registerWithEmail(name, email, password);
+        await registerWithEmail(name.trim(), email.trim().toLowerCase(), password);
         showToast('🎉 تم إنشاء حسابك الجديد في طبخات بنجاح!', 'success');
       } else {
-        await loginWithEmail(email, password);
+        await loginWithEmail(email.trim().toLowerCase(), password);
         showToast('🎉 أهلاً بعودتك، تم تسجيل الدخول بنجاح!', 'success');
       }
       setAuthMode('none');
@@ -154,15 +156,36 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
       setName('');
     } catch (err: any) {
       console.error(err);
-      if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
-        setAuthError('بيانات الدخول غير صحيحة، يرجى التحقق من البريد وكلمة المرور');
-      } else if (err.code === 'auth/email-already-in-use') {
-        setAuthError('هذا البريد الإلكتروني مسجل بالفعل');
-      } else {
-        setAuthError(err.message || 'حدث خطأ أثناء المحاولة');
-      }
+      setAuthError(getAuthErrorMessage(err));
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const getAuthErrorMessage = (err: any) => {
+    const messages: Record<string, string> = {
+      'auth/invalid-credential': 'بيانات الدخول غير صحيحة، تحقق من البريد وكلمة المرور.',
+      'auth/wrong-password': 'كلمة المرور غير صحيحة.',
+      'auth/user-not-found': 'لا يوجد حساب مرتبط بهذا البريد.',
+      'auth/email-already-in-use': 'هذا البريد الإلكتروني مسجل بالفعل.',
+      'auth/invalid-email': 'صيغة البريد الإلكتروني غير صحيحة.',
+      'auth/weak-password': 'كلمة المرور ضعيفة؛ استخدم 6 أحرف على الأقل.',
+      'auth/too-many-requests': 'محاولات كثيرة؛ انتظر قليلًا ثم حاول مرة أخرى.',
+      'auth/popup-closed-by-user': 'تم إغلاق نافذة Google قبل اكتمال تسجيل الدخول.',
+      'auth/popup-blocked': 'المتصفح منع نافذة Google؛ اسمح بالنوافذ المنبثقة وحاول مجددًا.',
+      'auth/unauthorized-domain': 'نطاق الموقع غير مصرح به في Firebase. تواصل مع مدير التطبيق.',
+      'auth/network-request-failed': 'تعذر الاتصال بالشبكة. تحقق من الإنترنت وحاول مجددًا.',
+    };
+    return messages[err?.code] || err?.message || 'حدث خطأ أثناء المحاولة.';
+  };
+
+  const handlePasswordReset = async () => {
+    setAuthError('');
+    try {
+      await resetPassword(email);
+      showToast('📧 تم إرسال رابط استعادة كلمة المرور إلى بريدك.', 'success');
+    } catch (err: any) {
+      setAuthError(getAuthErrorMessage(err));
     }
   };
 
@@ -298,6 +321,23 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                 <div className="inline-flex items-center gap-1 mt-2 text-[11px] text-amber-700 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200">
                   <ShieldCheck className="w-3.5 h-3.5" />
                   سجل دخولك لحفظ بياناتك في سحابة Firebase بشكل دائم
+                </div>
+              )}
+
+              {!isGuest && (
+                <div className={`inline-flex items-center gap-1 mt-2 text-[11px] px-2.5 py-1 rounded-full border ${
+                  dataSyncStatus === 'synced'
+                    ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                    : dataSyncStatus === 'error'
+                    ? 'text-rose-700 bg-rose-50 border-rose-200'
+                    : 'text-blue-700 bg-blue-50 border-blue-200'
+                }`}>
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  {dataSyncStatus === 'synced'
+                    ? 'بيانات الحساب محفوظة ومتزامنة سحابيًا'
+                    : dataSyncStatus === 'error'
+                    ? 'تعذرت المزامنة مؤقتًا؛ النسخة المحلية محفوظة'
+                    : 'جاري حفظ بيانات الحساب في السحابة...'}
                 </div>
               )}
 
@@ -929,6 +969,17 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                   />
                 </div>
               </div>
+
+              {authMode === 'login' && (
+                <button
+                  type="button"
+                  onClick={handlePasswordReset}
+                  disabled={!email.trim()}
+                  className="text-[11px] font-bold text-[#2D5A46] hover:underline disabled:text-stone-400 disabled:no-underline"
+                >
+                  نسيت كلمة المرور؟ اكتب بريدك ثم اضغط هنا
+                </button>
+              )}
 
               <button
                 type="submit"

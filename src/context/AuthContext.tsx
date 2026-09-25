@@ -7,8 +7,9 @@ import {
   createUserWithEmailAndPassword,
   updateProfile,
   signOut,
+  sendPasswordResetEmail,
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db, googleProvider } from '../lib/firebase';
 import { UserProfile, UserPreferences } from '../types/recipe';
 
@@ -20,6 +21,7 @@ interface AuthContextType {
   loginWithGoogle: () => Promise<void>;
   loginWithEmail: (email: string, pass: string) => Promise<void>;
   registerWithEmail: (name: string, email: string, pass: string) => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
   continueAsGuest: () => void;
   logout: () => Promise<void>;
   updatePreferences: (prefs: Partial<UserPreferences>) => Promise<void>;
@@ -83,7 +85,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               const data = snap.data();
               userDocData = {
                 ...userDocData,
+                email: data.email || userDocData.email,
                 displayName: data.displayName || userDocData.displayName,
+                photoURL: data.photoURL || userDocData.photoURL,
                 preferences: { ...DEFAULT_PREFERENCES, ...data.preferences },
               };
             } else {
@@ -92,7 +96,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 email: fbUser.email,
                 displayName: userDocData.displayName,
                 preferences: DEFAULT_PREFERENCES,
-                createdAt: new Date().toISOString(),
+                photoURL: userDocData.photoURL,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
               });
             }
           } catch (err) {
@@ -122,6 +128,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const createFallbackGuest = () => {
+    const savedGuest = localStorage.getItem('tabkhat_guest_user');
+    if (savedGuest) {
+      try {
+        const parsed = JSON.parse(savedGuest) as UserProfile;
+        if (parsed.uid?.startsWith('guest-')) {
+          setUser(parsed);
+          setIsGuest(true);
+          localStorage.setItem('tabkhat_is_guest', 'true');
+          return;
+        }
+      } catch {
+        localStorage.removeItem('tabkhat_guest_user');
+      }
+    }
+
     const guestUser: UserProfile = {
       uid: 'guest-' + Math.random().toString(36).substring(2, 9),
       displayName: 'زائر طبخات',
@@ -173,7 +194,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             email,
             displayName: name,
             preferences: DEFAULT_PREFERENCES,
-            createdAt: new Date().toISOString(),
+            photoURL: cred.user.photoURL,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
           });
         }
       }
@@ -183,6 +206,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const resetPassword = async (email: string) => {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) {
+      throw new Error('يرجى كتابة البريد الإلكتروني أولاً');
+    }
+    await sendPasswordResetEmail(auth, normalizedEmail);
   };
 
   const continueAsGuest = () => {
@@ -214,9 +245,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } else if (db && firebaseUser) {
       try {
         const userRef = doc(db, 'users', firebaseUser.uid);
-        await updateDoc(userRef, {
+        await setDoc(userRef, {
           preferences: updated.preferences,
-        });
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
       } catch (err) {
         console.warn('Error updating preferences in Firestore:', err);
       }
@@ -235,7 +267,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await updateProfile(firebaseUser, { displayName: name });
         if (db) {
           const userRef = doc(db, 'users', firebaseUser.uid);
-          await updateDoc(userRef, { displayName: name });
+          await setDoc(userRef, { displayName: name, updatedAt: serverTimestamp() }, { merge: true });
         }
       } catch (err) {
         console.warn('Error updating name:', err);
@@ -255,7 +287,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await updateProfile(firebaseUser, { photoURL });
         if (db) {
           const userRef = doc(db, 'users', firebaseUser.uid);
-          await updateDoc(userRef, { photoURL });
+          await setDoc(userRef, { photoURL, updatedAt: serverTimestamp() }, { merge: true });
         }
       } catch (err) {
         console.warn('Error updating photo:', err);
@@ -285,7 +317,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await updateProfile(firebaseUser, { displayName: defaultName });
         if (db) {
           const userRef = doc(db, 'users', firebaseUser.uid);
-          await updateDoc(userRef, { displayName: defaultName, preferences: defaultPrefs });
+          await setDoc(userRef, { displayName: defaultName, preferences: defaultPrefs, updatedAt: serverTimestamp() }, { merge: true });
         }
       } catch (err) {
         console.warn('Error resetting profile details:', err);
@@ -320,7 +352,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await updateProfile(firebaseUser, { displayName: 'مستخدم جديد', photoURL: '' });
         if (db) {
           const userRef = doc(db, 'users', firebaseUser.uid);
-          await updateDoc(userRef, { displayName: 'مستخدم جديد', photoURL: null, preferences: cleanPrefs });
+          await setDoc(userRef, { displayName: 'مستخدم جديد', photoURL: null, preferences: cleanPrefs, updatedAt: serverTimestamp() }, { merge: true });
         }
       } catch (err) {
         console.warn('Error deleting account details in Firestore:', err);
@@ -338,6 +370,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loginWithGoogle,
         loginWithEmail,
         registerWithEmail,
+        resetPassword,
         continueAsGuest,
         logout,
         updatePreferences,
