@@ -1,0 +1,21 @@
+{
+  "name": "طبخات - Tabkhat",
+  "short_name": "طبخات",
+  "description": "تطبيق طبخات لوصفات الطهي الذكية وجدول الوجبات وقائمة المشتريات",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FAF8F5",
+  "theme_color": "#E26D46",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["food", "lifestyle", "utilities"],
+  "lang": "ar",
+  "dir": "rtl"
+}

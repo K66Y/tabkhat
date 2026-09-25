@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <filter id="softShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#2D5A46" flood-opacity="0.15" />
+    </filter>
+  </defs>
+
+  <!-- Background Squircle matching phone icon (IMG_2073) -->
+  <rect width="512" height="512" rx="128" fill="#FAF8F5" />
+  
+  <!-- Subtle inner border -->
+  <rect x="4" y="4" width="504" height="504" rx="124" fill="none" stroke="#2D5A46" stroke-width="2" stroke-opacity="0.08" />
+
+  <!-- 3 Rising Steam Vapors in Terracotta / Orange (#E26D46) -->
+  <g stroke="#E26D46" stroke-width="14" stroke-linecap="round" fill="none" opacity="0.85">
+    <!-- Left steam -->
+    <path d="M210 160 C200 130 225 105 210 75" />
+    <!-- Center steam (tallest) -->
+    <path d="M256 150 C245 115 270 90 256 55" />
+    <!-- Right steam -->
+    <path d="M302 160 C290 130 315 105 302 75" />
+  </g>
+
+  <!-- Cooking Pot Group -->
+  <g filter="url(#softShadow)">
+    <!-- Orange Lid Handle / Knob -->
+    <rect x="236" y="174" width="40" height="14" rx="7" fill="#E26D46" />
+    <path d="M246 188 L266 188 L264 196 L248 196 Z" fill="#C95632" />
+
+    <!-- Pot Lid Dome (Forest Green #386B52) -->
+    <path d="M172 230 C172 195 340 195 340 230 Z" fill="#3D7358" />
+    <!-- Lid Rim -->
+    <path d="M156 226 C156 222 356 222 356 226 L352 236 L160 236 Z" fill="#2E5C45" />
+
+    <!-- Pot Side Handles -->
+    <!-- Left Handle -->
+    <path d="M152 248 C132 248 132 278 152 278 L160 278 L160 248 Z" fill="#2E5C45" />
+    <rect x="144" y="256" width="10" height="14" rx="4" fill="#FAF8F5" opacity="0.9" />
+
+    <!-- Right Handle -->
+    <path d="M360 248 C380 248 380 278 360 278 L352 278 L352 248 Z" fill="#2E5C45" />
+    <rect x="358" y="256" width="10" height="14" rx="4" fill="#FAF8F5" opacity="0.9" />
+
+    <!-- Pot Body -->
+    <!-- Upper rim line -->
+    <rect x="160" y="234" width="192" height="14" rx="4" fill="#2D5A46" />
+    <!-- Main Pot Tapered Body -->
+    <path d="M164 246 L188 356 C190 366 200 374 212 374 L300 374 C312 374 322 366 324 356 L348 246 Z" fill="#386B52" />
+
+    <!-- Pot highlights & shading -->
+    <path d="M170 250 L191 352 C193 360 200 366 208 366 L216 366 L196 250 Z" fill="#FFFFFF" opacity="0.12" />
+    
+    <!-- White Decorative Motif (inverted triangle / crest as in screenshot) -->
+    <path d="M256 312 L244 348 L268 348 Z" fill="#FAF8F5" opacity="0.95" />
+  </g>
+</svg>
