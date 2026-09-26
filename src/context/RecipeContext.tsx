@@ -29,6 +29,7 @@ interface ToastInfo {
 
 interface RecipeContextType {
   dataSyncStatus: 'local' | 'syncing' | 'synced' | 'error';
+  isUserDataLoading: boolean;
   recipes: Recipe[];
   myRecipes: Recipe[];
   favorites: string[];
@@ -99,6 +100,7 @@ const RecipeContext = createContext<RecipeContextType | undefined>(undefined);
 export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, firebaseUser } = useAuth();
   const [dataSyncStatus, setDataSyncStatus] = useState<'local' | 'syncing' | 'synced' | 'error'>('local');
+  const [isUserDataLoading, setIsUserDataLoading] = useState(true);
   const hydratedUserRef = useRef<string | null>(null);
 
   const [recipes, setRecipes] = useState<Recipe[]>(() => {
@@ -237,6 +239,7 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     let cancelled = false;
     const previousUid = hydratedUserRef.current;
     hydratedUserRef.current = null;
+    setIsUserDataLoading(true);
     setDataSyncStatus(firebaseUser?.uid === uid ? 'syncing' : 'local');
 
     const hydrate = async () => {
@@ -312,6 +315,7 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           } catch (error) {
             console.warn('Could not create the unified user data snapshot:', error);
             setDataSyncStatus('error');
+            setIsUserDataLoading(false);
             return;
           }
         }
@@ -319,6 +323,7 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       } else {
         setDataSyncStatus('local');
       }
+      setIsUserDataLoading(false);
     };
 
     hydrate();
@@ -941,6 +946,7 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     <RecipeContext.Provider
       value={{
         dataSyncStatus,
+        isUserDataLoading,
         recipes,
         myRecipes,
         favorites,

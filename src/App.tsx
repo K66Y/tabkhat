@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { RecipeProvider, useRecipes } from './context/RecipeContext';
+import { PotLogo } from './components/PotLogo';
 import { Navbar } from './components/Navbar';
 import { BottomNav, TabType } from './components/BottomNav';
 import { HomeScreen } from './components/HomeScreen';
@@ -17,6 +18,122 @@ import { AddToPlanModal } from './components/AddToPlanModal';
 import { CookingTimerWidget } from './components/CookingTimerWidget';
 import { NotificationToast } from './components/NotificationToast';
 import { Recipe, RecipeCategory } from './types/recipe';
+
+const authErrorMessage = (error: unknown) => {
+  const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : '';
+  if (code.includes('invalid-credential') || code.includes('wrong-password')) return 'البريد أو كلمة المرور غير صحيحة.';
+  if (code.includes('email-already-in-use')) return 'هذا البريد مسجل مسبقاً، جرّب تسجيل الدخول.';
+  if (code.includes('weak-password')) return 'كلمة المرور يجب أن تكون 6 أحرف على الأقل.';
+  if (code.includes('invalid-email')) return 'صيغة البريد الإلكتروني غير صحيحة.';
+  if (code.includes('popup-closed')) return 'أُغلقت نافذة تسجيل Google قبل اكتمال العملية.';
+  return 'تعذر إكمال العملية الآن. تحقق من الاتصال وحاول مرة أخرى.';
+};
+
+const SplashScreen: React.FC = () => (
+  <div dir="rtl" className="min-h-screen bg-[#FAF8F5] flex items-center justify-center px-6">
+    <div className="text-center">
+      <PotLogo size={104} className="mx-auto rounded-[2rem] shadow-lg" />
+      <h1 className="mt-5 font-heading text-3xl font-black text-[#2D5A46]">طبخات</h1>
+      <p className="mt-2 text-sm text-stone-500">نجهّز وصفاتك وبيانات حسابك...</p>
+      <div className="mx-auto mt-5 h-1.5 w-36 overflow-hidden rounded-full bg-stone-200">
+        <div className="h-full w-1/2 animate-pulse rounded-full bg-[#E26D46]" />
+      </div>
+    </div>
+  </div>
+);
+
+const LoginGate: React.FC = () => {
+  const { loginWithGoogle, loginWithEmail, registerWithEmail, resetPassword } = useAuth();
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const run = async (action: () => Promise<void>) => {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await action();
+    } catch (err) {
+      setError(authErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (isRegistering && !name.trim()) {
+      setError('اكتب اسم المستخدم أولاً.');
+      return;
+    }
+    void run(() => isRegistering
+      ? registerWithEmail(name.trim(), email.trim(), password)
+      : loginWithEmail(email.trim(), password));
+  };
+
+  const sendReset = () => {
+    if (!email.trim()) {
+      setError('اكتب بريدك الإلكتروني أولاً ثم اضغط نسيت كلمة المرور.');
+      return;
+    }
+    void run(async () => {
+      await resetPassword(email);
+      setNotice('أرسلنا رابط إعادة تعيين كلمة المرور إلى بريدك.');
+    });
+  };
+
+  return (
+    <div dir="rtl" className="min-h-screen bg-[#FAF8F5] flex items-center justify-center p-4">
+      <div className="w-full max-w-md rounded-[2rem] border border-stone-200 bg-white p-6 sm:p-8 shadow-xl">
+        <PotLogo size={82} className="mx-auto rounded-3xl" />
+        <h1 className="mt-4 text-center font-heading text-2xl font-black text-[#2D5A46]">أهلاً بك في طبخات</h1>
+        <p className="mt-2 text-center text-sm text-stone-500">سجّل دخولك أولاً لحفظ وصفاتك واسترجاعها على حسابك.</p>
+
+        <button
+          type="button"
+          onClick={() => void run(loginWithGoogle)}
+          disabled={busy}
+          className="mt-6 w-full rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm font-bold text-stone-700 hover:bg-stone-50 disabled:opacity-60"
+        >
+          المتابعة باستخدام Google
+        </button>
+
+        <div className="my-4 flex items-center gap-3 text-xs text-stone-400"><span className="h-px flex-1 bg-stone-200" /><span>أو بالبريد</span><span className="h-px flex-1 bg-stone-200" /></div>
+
+        <form onSubmit={submit} className="space-y-3">
+          {isRegistering && (
+            <input required value={name} onChange={(e) => setName(e.target.value)} placeholder="اسم المستخدم" className="w-full rounded-2xl border border-stone-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#E26D46]/30" />
+          )}
+          <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="البريد الإلكتروني" className="w-full rounded-2xl border border-stone-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#E26D46]/30" dir="ltr" />
+          <input required minLength={6} type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="كلمة المرور" className="w-full rounded-2xl border border-stone-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#E26D46]/30" dir="ltr" />
+          {error && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-xs font-semibold text-rose-700">{error}</p>}
+          {notice && <p className="rounded-xl bg-emerald-50 p-3 text-xs font-semibold text-emerald-800">{notice}</p>}
+          <button disabled={busy} className="w-full rounded-2xl bg-[#2D5A46] px-4 py-3 text-sm font-black text-white hover:bg-[#234837] disabled:opacity-60">
+            {busy ? 'جاري التحقق...' : isRegistering ? 'إنشاء الحساب والدخول' : 'تسجيل الدخول'}
+          </button>
+        </form>
+
+        {!isRegistering && <button type="button" onClick={sendReset} disabled={busy} className="mt-3 w-full text-xs font-bold text-[#E26D46]">نسيت كلمة المرور؟</button>}
+        <button type="button" onClick={() => { setIsRegistering((value) => !value); setError(''); setNotice(''); }} className="mt-4 w-full text-sm font-bold text-[#2D5A46]">
+          {isRegistering ? 'لديك حساب؟ سجل الدخول' : 'مستخدم جديد؟ أنشئ حساباً'}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const AppGate: React.FC = () => {
+  const { firebaseUser, isLoading } = useAuth();
+  const { isUserDataLoading } = useRecipes();
+  if (isLoading || (firebaseUser && isUserDataLoading)) return <SplashScreen />;
+  if (!firebaseUser) return <LoginGate />;
+  return <TabkhatMain />;
+};
 
 const TabkhatMain: React.FC = () => {
   const {
@@ -208,7 +325,7 @@ export default function App() {
   return (
     <AuthProvider>
       <RecipeProvider>
-        <TabkhatMain />
+        <AppGate />
       </RecipeProvider>
     </AuthProvider>
   );

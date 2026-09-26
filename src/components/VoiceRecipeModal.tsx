@@ -102,6 +102,7 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState<RecipeCategory>('أطباق رئيسية');
+  const [cuisine, setCuisine] = useState('سعودي');
   const [difficulty, setDifficulty] = useState<DifficultyLevel>('سهل');
   const [prepTime, setPrepTime] = useState<number>(15);
   const [cookTime, setCookTime] = useState<number>(25);
@@ -137,6 +138,7 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
       setTitle(recipeToEdit.title || '');
       setDescription(recipeToEdit.description || '');
       setCategory(recipeToEdit.category || 'أطباق رئيسية');
+      setCuisine(recipeToEdit.cuisine || 'سعودي');
       setDifficulty(recipeToEdit.difficulty || 'سهل');
       setPrepTime(recipeToEdit.prepTime || 15);
       setCookTime(recipeToEdit.cookTime || 25);
@@ -169,6 +171,7 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
       setTitle('');
       setDescription('');
       setCategory('أطباق رئيسية');
+      setCuisine('سعودي');
       setDifficulty('سهل');
       setPrepTime(15);
       setCookTime(25);
@@ -188,9 +191,14 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
 
   // Voice recording state
   const [isRecording, setIsRecording] = useState(false);
+  const [isDescriptionRecording, setIsDescriptionRecording] = useState(false);
   const [transcript, setTranscript] = useState('');
+  const [descriptionTranscript, setDescriptionTranscript] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const recognitionRef = useRef<any>(null);
+  const recordingModeRef = useRef<'recipe' | 'description' | null>(null);
+  const capturedTextRef = useRef('');
+  const finishRecordingRef = useRef<(mode: 'recipe' | 'description', text: string) => void>(() => {});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Initialize Web Speech API
@@ -209,16 +217,31 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
           for (let i = 0; i < event.results.length; i++) {
             currentTranscript += event.results[i][0].transcript + ' ';
           }
-          setTranscript(currentTranscript);
+          const cleanText = currentTranscript.trim();
+          capturedTextRef.current = cleanText;
+          if (recordingModeRef.current === 'description') {
+            setDescriptionTranscript(cleanText);
+          } else {
+            setTranscript(cleanText);
+          }
         };
 
         recognition.onerror = (event: any) => {
           console.warn('Speech recognition error:', event.error);
           setIsRecording(false);
+          setIsDescriptionRecording(false);
+          recordingModeRef.current = null;
         };
 
         recognition.onend = () => {
+          const mode = recordingModeRef.current;
+          const capturedText = capturedTextRef.current.trim();
+          recordingModeRef.current = null;
           setIsRecording(false);
+          setIsDescriptionRecording(false);
+          if (mode && capturedText) {
+            finishRecordingRef.current(mode, capturedText);
+          }
         };
 
         recognitionRef.current = recognition;
@@ -226,33 +249,54 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
     }
   }, []);
 
-  const toggleRecording = () => {
+  const toggleRecording = (mode: 'recipe' | 'description') => {
     if (!recognitionRef.current) {
-      // Fallback: prompt for input or simulate speech recognition
       const simulatedText = window.prompt(
-        'المتصفح لا يدعم الميكروفون المباشر. اكتب أو الصق وصف الطبخة وسيقوم النظام بفرز المقادير والأعداد وتعبئتها فوراً في الخانات:',
-        '3 بيضات، كوبين طحين، نصف كوب سكر، ملعقة فانيلا، رشة ملح...'
+        mode === 'description'
+          ? 'المتصفح لا يدعم الميكروفون المباشر. اكتب وصف الطبخة وسيُضاف إلى خانة الوصف فقط:'
+          : 'المتصفح لا يدعم الميكروفون المباشر. اكتب أو الصق الوصفة والمقادير وسيقوم النظام بتعبئة الخانات تلقائياً:',
+        mode === 'description'
+          ? 'طبق شهي بنكهة منزلية غنية ومذاق متوازن...'
+          : 'اسم الوصفة كبسة دجاج، 3 أكواب رز، دجاجة، بصلة، والطبخ 45 دقيقة...'
       );
       if (simulatedText) {
-        handleAnalyzeWithAI(simulatedText);
+        finishRecordingRef.current(mode, simulatedText);
       }
       return;
     }
 
-    if (isRecording) {
+    const isCurrentModeRecording =
+      (mode === 'recipe' && isRecording) ||
+      (mode === 'description' && isDescriptionRecording);
+
+    if (isCurrentModeRecording) {
       recognitionRef.current.stop();
-      setIsRecording(false);
-      if (transcript.trim()) {
-        handleAnalyzeWithAI(transcript);
-      }
     } else {
       try {
-        setTranscript('');
+        if (isRecording || isDescriptionRecording) {
+          recognitionRef.current.stop();
+          return;
+        }
+        recordingModeRef.current = mode;
+        capturedTextRef.current = '';
+        if (mode === 'description') {
+          setDescriptionTranscript('');
+          setIsDescriptionRecording(true);
+        } else {
+          setTranscript('');
+          setIsRecording(true);
+        }
         recognitionRef.current.start();
-        setIsRecording(true);
-        showToast('جاري الاستماع... اذكر المقادير والكميات (مثال: 3 بيضات، كوبين طحين...)', 'info');
+        showToast(
+          mode === 'description'
+            ? 'جاري تسجيل وصف الطبخة فقط...'
+            : 'جاري الاستماع... اذكر اسم الوصفة والمقادير والكميات والخطوات.',
+          'info'
+        );
       } catch {
         setIsRecording(false);
+        setIsDescriptionRecording(false);
+        recordingModeRef.current = null;
       }
     }
   };
@@ -287,13 +331,14 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
         if (data && data.recipe) {
           const r = data.recipe;
           if (r.title) setTitle(r.title);
-          if (r.description) setDescription(r.description);
           if (r.category) setCategory(r.category as RecipeCategory);
+          if (r.cuisine) setCuisine(String(r.cuisine));
           if (r.prepTime) setPrepTime(Number(r.prepTime));
           if (r.cookTime) setCookTime(Number(r.cookTime));
           if (r.baseServings) setBaseServings(Number(r.baseServings));
           if (r.calories) setCalories(Number(r.calories));
           if (r.difficulty) setDifficulty(r.difficulty as DifficultyLevel);
+          if (r.imageUrl) setImageUrl(String(r.imageUrl));
 
           if (Array.isArray(r.ingredients) && r.ingredients.length > 0) {
             setIngredients(
@@ -325,6 +370,17 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
     } finally {
       setIsAnalyzing(false);
     }
+  };
+
+  finishRecordingRef.current = (mode, text) => {
+    if (mode === 'description') {
+      setDescription((current) => [current.trim(), text.trim()].filter(Boolean).join(' '));
+      setDescriptionTranscript(text.trim());
+      showToast('تمت إضافة التسجيل إلى وصف الطبخة فقط.', 'success');
+      return;
+    }
+    setTranscript(text.trim());
+    handleAnalyzeWithAI(text);
   };
 
   // Quick manual paste-and-distribute handler
@@ -452,6 +508,7 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
         title: title.trim(),
         description: description.trim() || 'وصفة خاصة لذيذة ومبتكرة مضافة في دفتر وصفاتي.',
         category,
+        cuisine: cuisine.trim() || 'سعودي',
         prepTime: Number(prepTime) || 15,
         cookTime: Number(cookTime) || 25,
         difficulty,
@@ -469,7 +526,7 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
       title: title.trim(),
       description: description.trim() || 'وصفة خاصة لذيذة ومبتكرة مضافة في دفتر وصفاتي.',
       category,
-      cuisine: 'سعودي',
+      cuisine: cuisine.trim() || 'سعودي',
       prepTime: Number(prepTime) || 15,
       cookTime: Number(cookTime) || 25,
       difficulty,
@@ -558,7 +615,7 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
               {/* Left Side in RTL: Action Button */}
               <button
                 type="button"
-                onClick={toggleRecording}
+                onClick={() => toggleRecording('recipe')}
                 disabled={isAnalyzing}
                 className={`px-3.5 py-2 rounded-xl font-bold text-xs shrink-0 flex items-center gap-1.5 shadow-sm transition-all active:scale-95 ${
                   isRecording
@@ -718,9 +775,33 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
 
           {/* 📝 Short Description (Matches IMG_2071) */}
           <div className="space-y-1.5 text-right">
-            <label className="block text-xs font-bold text-[#242A26]">
-              وصف الطبخة:
-            </label>
+            <div className="flex items-center justify-between gap-3">
+              <label className="block text-xs font-bold text-[#242A26]">
+                وصف الطبخة:
+              </label>
+              <button
+                type="button"
+                onClick={() => toggleRecording('description')}
+                disabled={isRecording || isAnalyzing}
+                className={`px-3 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1.5 transition-all disabled:opacity-50 ${
+                  isDescriptionRecording
+                    ? 'bg-rose-600 text-white animate-pulse'
+                    : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                }`}
+              >
+                {isDescriptionRecording ? (
+                  <>
+                    <Square className="w-3 h-3 fill-white" />
+                    <span>إيقاف وإضافة للوصف</span>
+                  </>
+                ) : (
+                  <>
+                    <Mic className="w-3.5 h-3.5" />
+                    <span>تسجيل الوصف فقط</span>
+                  </>
+                )}
+              </button>
+            </div>
             <textarea
               rows={2}
               value={description}
@@ -728,10 +809,16 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
               placeholder="وصف شهي ومختصر للطبخة ونكهاتها المميزة..."
               className="w-full px-4 py-2 rounded-2xl bg-white border border-stone-200/90 text-xs sm:text-sm text-[#242A26] placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-[#E26D46]/40 shadow-2xs text-right resize-none"
             />
+            {descriptionTranscript && (
+              <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-stone-700">
+                <span className="font-bold text-emerald-800">نص الوصف الملتقط: </span>
+                {descriptionTranscript}
+              </div>
+            )}
           </div>
 
           {/* 🍽️ Category & Difficulty Selectors (Matches IMG_2071) */}
-          <div className="grid grid-cols-2 gap-3 text-right">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-right">
             {/* Category */}
             <div className="space-y-1">
               <label className="block text-[11px] font-bold text-stone-600">
@@ -752,6 +839,19 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
                 <option value="وجبات صحية">وجبات صحية</option>
                 <option value="مشروبات">مشروبات</option>
               </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="block text-[11px] font-bold text-stone-600">
+                المطبخ
+              </label>
+              <input
+                type="text"
+                value={cuisine}
+                onChange={(e) => setCuisine(e.target.value)}
+                placeholder="مثال: سعودي، خليجي، إيطالي"
+                className="w-full p-2.5 rounded-xl bg-white border border-stone-200/90 text-xs font-bold text-[#242A26] shadow-2xs focus:outline-none text-right"
+              />
             </div>
 
             {/* Difficulty */}
@@ -890,9 +990,10 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
 
             {/* Column Labels */}
             <div className="grid grid-cols-12 gap-2 text-[11px] font-bold text-stone-500 px-1 pt-1">
-              <span className="col-span-5 text-right">اسم المكون</span>
+              <span className="col-span-4 text-right">اسم المكون</span>
               <span className="col-span-2 text-center">العدد/الكمية</span>
-              <span className="col-span-4 text-right">الوحدة</span>
+              <span className="col-span-2 text-right">الوحدة</span>
+              <span className="col-span-3 text-right">التصنيف</span>
               <span className="col-span-1 text-center">حذف</span>
             </div>
 
@@ -901,7 +1002,7 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
               {ingredients.map((ing) => (
                 <div key={ing.id} className="grid grid-cols-12 gap-2 items-center">
                   {/* Ingredient name input (Right in RTL: 5 cols) */}
-                  <div className="col-span-5">
+                  <div className="col-span-4">
                     <input
                       type="text"
                       value={ing.name}
@@ -934,8 +1035,8 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
                     />
                   </div>
 
-                  {/* Unit select (4 cols) */}
-                  <div className="col-span-4">
+                  {/* Unit select */}
+                  <div className="col-span-2">
                     <select
                       value={ing.unit}
                       onChange={(e) => {
@@ -957,6 +1058,26 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
                       <option value="علبة">علبة</option>
                       <option value="لتر">لتر</option>
                       <option value="مل">مل</option>
+                    </select>
+                  </div>
+
+                  <div className="col-span-3">
+                    <select
+                      value={ing.category}
+                      onChange={(e) => {
+                        const val = e.target.value as IngredientCategory;
+                        setIngredients((prev) =>
+                          prev.map((i) => (i.id === ing.id ? { ...i, category: val } : i))
+                        );
+                      }}
+                      className="w-full px-2 py-2 rounded-xl bg-stone-50 border border-stone-200 text-[11px] font-semibold text-[#242A26] focus:outline-none text-right"
+                    >
+                      <option value="خضار وفواكه">خضار وفواكه</option>
+                      <option value="لحوم ودواجن">لحوم ودواجن</option>
+                      <option value="توابل وبهارات">توابل وبهارات</option>
+                      <option value="معلبات ومؤونة">معلبات ومؤونة</option>
+                      <option value="ألبان وأجبان">ألبان وأجبان</option>
+                      <option value="أخرى">أخرى</option>
                     </select>
                   </div>
 
