@@ -10,6 +10,7 @@ import { INITIAL_RECIPES } from '../data/seedRecipes';
 import { useAuth } from './AuthContext';
 import { db } from '../lib/firebase';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { withTimeout } from '../lib/async';
 
 export interface ActiveTimer {
   id: string;
@@ -256,17 +257,17 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       if (firebaseUser?.uid === uid && db) {
         try {
-          const cloudDoc = await getDoc(doc(db, 'userData', uid));
+          const cloudDoc = await withTimeout(getDoc(doc(db, 'userData', uid)), 8000);
           if (cloudDoc.exists()) {
             snapshot = cloudDoc.data() as UserDataSnapshot;
             hasUnifiedCloudData = true;
           } else {
             // One-time migration from the older three-document layout.
-            const [favDoc, planDoc, shopDoc] = await Promise.all([
+            const [favDoc, planDoc, shopDoc] = await withTimeout(Promise.all([
               getDoc(doc(db, 'favorites', uid)),
               getDoc(doc(db, 'mealPlans', uid)),
               getDoc(doc(db, 'shoppingList', uid)),
-            ]);
+            ]), 8000);
             snapshot = {
               ...(snapshot || {}),
               ...(favDoc.exists() && Array.isArray(favDoc.data().ids)
@@ -308,10 +309,10 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (firebaseUser?.uid === uid && db) {
         if (!hasUnifiedCloudData) {
           try {
-            await setDoc(doc(db, 'userData', uid), {
+            await withTimeout(setDoc(doc(db, 'userData', uid), {
               ...JSON.parse(JSON.stringify(completeSnapshot)),
               updatedAt: serverTimestamp(),
-            });
+            }), 8000);
           } catch (error) {
             console.warn('Could not create the unified user data snapshot:', error);
             setDataSyncStatus('error');

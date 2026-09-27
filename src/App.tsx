@@ -30,6 +30,8 @@ const authErrorMessage = (error: unknown) => {
   if (code.includes('network-request-failed')) return 'تعذر الاتصال بخدمة التسجيل. تحقق من الإنترنت وحاول مجددًا.';
   if (code.includes('unauthorized-domain')) return 'رابط التطبيق غير مصرح به في Firebase.';
   if (code.includes('popup-closed')) return 'أُغلقت نافذة تسجيل Google قبل اكتمال العملية.';
+  if (code.includes('popup-blocked')) return 'المتصفح منع نافذة Google. اسمح بالنوافذ المنبثقة ثم حاول مجددًا.';
+  if (code.includes('operation-timeout')) return 'استغرقت العملية وقتًا أطول من المعتاد. تحقق من الاتصال وحاول مجددًا.';
   return 'تعذر إكمال العملية الآن. تحقق من الاتصال وحاول مرة أخرى.';
 };
 

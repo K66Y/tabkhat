@@ -11,6 +11,7 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db, googleProvider } from '../lib/firebase';
+import { withTimeout } from '../lib/async';
 import { UserProfile, UserPreferences } from '../types/recipe';
 
 interface AuthContextType {
@@ -80,7 +81,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (db) {
           try {
             const userRef = doc(db, 'users', fbUser.uid);
-            const snap = await getDoc(userRef);
+            const snap = await withTimeout(getDoc(userRef), 8000);
             if (snap.exists()) {
               const data = snap.data();
               userDocData = {
@@ -91,7 +92,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 preferences: { ...DEFAULT_PREFERENCES, ...data.preferences },
               };
             } else {
-              await setDoc(userRef, {
+              await withTimeout(setDoc(userRef, {
                 uid: fbUser.uid,
                 email: fbUser.email,
                 displayName: userDocData.displayName,
@@ -99,7 +100,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 photoURL: userDocData.photoURL,
                 createdAt: serverTimestamp(),
                 updatedAt: serverTimestamp(),
-              });
+              }), 8000);
             }
           } catch (err) {
             console.warn('Could not sync user profile with Firestore:', err);
@@ -159,39 +160,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const loginWithGoogle = async () => {
     try {
-      setIsLoading(true);
-      await signInWithPopup(auth, googleProvider);
+      await withTimeout(signInWithPopup(auth, googleProvider), 30000);
     } catch (err: any) {
       console.error('Google Sign-in error:', err);
       throw err;
-    } finally {
-      setIsLoading(false);
     }
   };
 
   const loginWithEmail = async (email: string, pass: string) => {
     try {
-      setIsLoading(true);
       const normalizedEmail = email.trim().toLowerCase();
-      const credential = await signInWithEmailAndPassword(auth, normalizedEmail, pass);
-      await credential.user.getIdToken(true);
+      const credential = await withTimeout(
+        signInWithEmailAndPassword(auth, normalizedEmail, pass),
+        15000
+      );
+      await withTimeout(credential.user.getIdToken(true), 10000);
     } catch (err: any) {
       console.error('Email sign-in error:', err);
       throw err;
-    } finally {
-      setIsLoading(false);
     }
   };
 
   const registerWithEmail = async (name: string, email: string, pass: string) => {
     try {
-      setIsLoading(true);
       const normalizedName = name.trim();
       const normalizedEmail = email.trim().toLowerCase();
-      const cred = await createUserWithEmailAndPassword(auth, normalizedEmail, pass);
+      const cred = await withTimeout(
+        createUserWithEmailAndPassword(auth, normalizedEmail, pass),
+        15000
+      );
       if (cred.user) {
-        await updateProfile(cred.user, { displayName: normalizedName });
-        await cred.user.getIdToken(true);
+        await withTimeout(updateProfile(cred.user, { displayName: normalizedName }), 10000);
+        await withTimeout(cred.user.getIdToken(true), 10000);
 
         const registeredProfile: UserProfile = {
           uid: cred.user.uid,
@@ -209,7 +209,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (db) {
           try {
             const userRef = doc(db, 'users', cred.user.uid);
-            await setDoc(userRef, {
+            await withTimeout(setDoc(userRef, {
               uid: cred.user.uid,
               email: normalizedEmail,
               displayName: normalizedName,
@@ -217,7 +217,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               photoURL: cred.user.photoURL,
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
-            }, { merge: true });
+            }, { merge: true }), 8000);
           } catch (firestoreError) {
             // The Auth account is already valid. A temporary profile-sync error
             // must not send the user back to the login screen.
@@ -228,8 +228,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (err: any) {
       console.error('Registration error:', err);
       throw err;
-    } finally {
-      setIsLoading(false);
     }
   };
 
