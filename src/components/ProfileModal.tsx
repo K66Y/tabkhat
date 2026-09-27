@@ -174,6 +174,8 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
       'auth/popup-closed-by-user': 'تم إغلاق نافذة Google قبل اكتمال تسجيل الدخول.',
       'auth/popup-blocked': 'المتصفح منع نافذة Google؛ اسمح بالنوافذ المنبثقة وحاول مجددًا.',
       'auth/unauthorized-domain': 'نطاق الموقع غير مصرح به في Firebase. تواصل مع مدير التطبيق.',
+      'auth/operation-not-allowed': 'تسجيل البريد وكلمة المرور غير مفعّل بعد في Firebase. استخدم Google مؤقتًا.',
+      'auth/password-login-disabled': 'تسجيل البريد وكلمة المرور غير مفعّل بعد في Firebase. استخدم Google مؤقتًا.',
       'auth/network-request-failed': 'تعذر الاتصال بالشبكة. تحقق من الإنترنت وحاول مجددًا.',
     };
     return messages[err?.code] || err?.message || 'حدث خطأ أثناء المحاولة.';

@@ -25,6 +25,10 @@ const authErrorMessage = (error: unknown) => {
   if (code.includes('email-already-in-use')) return 'هذا البريد مسجل مسبقاً، جرّب تسجيل الدخول.';
   if (code.includes('weak-password')) return 'كلمة المرور يجب أن تكون 6 أحرف على الأقل.';
   if (code.includes('invalid-email')) return 'صيغة البريد الإلكتروني غير صحيحة.';
+  if (code.includes('operation-not-allowed') || code.includes('password-login-disabled')) return 'تسجيل البريد وكلمة المرور غير مفعّل بعد في Firebase. استخدم Google مؤقتًا أو فعّل مزوّد Email/Password.';
+  if (code.includes('too-many-requests')) return 'توجد محاولات كثيرة. انتظر قليلًا ثم حاول مرة أخرى.';
+  if (code.includes('network-request-failed')) return 'تعذر الاتصال بخدمة التسجيل. تحقق من الإنترنت وحاول مجددًا.';
+  if (code.includes('unauthorized-domain')) return 'رابط التطبيق غير مصرح به في Firebase.';
   if (code.includes('popup-closed')) return 'أُغلقت نافذة تسجيل Google قبل اكتمال العملية.';
   return 'تعذر إكمال العملية الآن. تحقق من الاتصال وحاول مرة أخرى.';
 };
@@ -92,7 +96,7 @@ const LoginGate: React.FC = () => {
       <div className="w-full max-w-md rounded-[2rem] border border-stone-200 bg-white p-6 sm:p-8 shadow-xl">
         <PotLogo size={82} className="mx-auto rounded-3xl" />
         <h1 className="mt-4 text-center font-heading text-2xl font-black text-[#2D5A46]">أهلاً بك في طبخات</h1>
-        <p className="mt-2 text-center text-sm text-stone-500">سجّل دخولك أولاً لحفظ وصفاتك واسترجاعها على حسابك.</p>
+      <p className="mt-2 text-center text-sm text-stone-500">سجّل دخولك أولاً لحفظ وصفاتك واسترجاعها على حسابك.</p>
 
         <button
           type="button"
@@ -100,7 +104,7 @@ const LoginGate: React.FC = () => {
           disabled={busy}
           className="mt-6 w-full rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm font-bold text-stone-700 hover:bg-stone-50 disabled:opacity-60"
         >
-          المتابعة باستخدام Google
+          المتابعة باستخدام Google — الأسرع
         </button>
 
         <div className="my-4 flex items-center gap-3 text-xs text-stone-400"><span className="h-px flex-1 bg-stone-200" /><span>أو بالبريد</span><span className="h-px flex-1 bg-stone-200" /></div>

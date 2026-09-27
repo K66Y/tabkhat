@@ -172,7 +172,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const loginWithEmail = async (email: string, pass: string) => {
     try {
       setIsLoading(true);
-      await signInWithEmailAndPassword(auth, email, pass);
+      const normalizedEmail = email.trim().toLowerCase();
+      const credential = await signInWithEmailAndPassword(auth, normalizedEmail, pass);
+      await credential.user.getIdToken(true);
     } catch (err: any) {
       console.error('Email sign-in error:', err);
       throw err;
@@ -184,20 +186,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const registerWithEmail = async (name: string, email: string, pass: string) => {
     try {
       setIsLoading(true);
-      const cred = await createUserWithEmailAndPassword(auth, email, pass);
+      const normalizedName = name.trim();
+      const normalizedEmail = email.trim().toLowerCase();
+      const cred = await createUserWithEmailAndPassword(auth, normalizedEmail, pass);
       if (cred.user) {
-        await updateProfile(cred.user, { displayName: name });
+        await updateProfile(cred.user, { displayName: normalizedName });
+        await cred.user.getIdToken(true);
+
+        const registeredProfile: UserProfile = {
+          uid: cred.user.uid,
+          email: normalizedEmail,
+          displayName: normalizedName,
+          photoURL: cred.user.photoURL,
+          isGuest: false,
+          preferences: DEFAULT_PREFERENCES,
+        };
+        setFirebaseUser(cred.user);
+        setUser(registeredProfile);
+        setIsGuest(false);
+        localStorage.removeItem('tabkhat_is_guest');
+
         if (db) {
-          const userRef = doc(db, 'users', cred.user.uid);
-          await setDoc(userRef, {
-            uid: cred.user.uid,
-            email,
-            displayName: name,
-            preferences: DEFAULT_PREFERENCES,
-            photoURL: cred.user.photoURL,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
+          try {
+            const userRef = doc(db, 'users', cred.user.uid);
+            await setDoc(userRef, {
+              uid: cred.user.uid,
+              email: normalizedEmail,
+              displayName: normalizedName,
+              preferences: DEFAULT_PREFERENCES,
+              photoURL: cred.user.photoURL,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            }, { merge: true });
+          } catch (firestoreError) {
+            // The Auth account is already valid. A temporary profile-sync error
+            // must not send the user back to the login screen.
+            console.warn('Account created; profile sync will retry later:', firestoreError);
+          }
         }
       }
     } catch (err: any) {
