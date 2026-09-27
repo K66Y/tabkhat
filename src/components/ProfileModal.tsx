@@ -101,6 +101,8 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     user?.preferences?.favoriteCuisines || ['سعودي', 'خليجي']
   );
   const [customAvatarInput, setCustomAvatarInput] = useState('');
+  const [isAvatarProcessing, setIsAvatarProcessing] = useState(false);
+  const [avatarError, setAvatarError] = useState('');
 
   const AVATAR_PRESETS = [
     { id: 'chef1', url: 'https://images.unsplash.com/photo-1577219491135-ce391730fb2c?auto=format&fit=crop&w=300&q=80', label: 'شيف محترف' },
@@ -211,6 +213,60 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     });
     setIsEditProfileModalOpen(false);
     showToast('🎉 تم حفظ وتحديث بيانات وملف الحساب بنجاح!', 'success');
+  };
+
+  const handleAvatarFile = async (file?: File) => {
+    if (!file) return;
+    setAvatarError('');
+
+    if (!file.type.startsWith('image/')) {
+      setAvatarError('اختر ملف صورة صالحًا من الاستوديو.');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setAvatarError('حجم الصورة كبير جدًا. اختر صورة أقل من 10 ميجابايت.');
+      return;
+    }
+
+    setIsAvatarProcessing(true);
+    try {
+      const source = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error('تعذر قراءة الصورة.'));
+        reader.readAsDataURL(file);
+      });
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const element = new Image();
+        element.onload = () => resolve(element);
+        element.onerror = () => reject(new Error('تعذر فتح الصورة.'));
+        element.src = source;
+      });
+
+      const side = Math.min(image.naturalWidth, image.naturalHeight);
+      const canvas = document.createElement('canvas');
+      canvas.width = 320;
+      canvas.height = 320;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('تعذر تجهيز الصورة.');
+      context.drawImage(
+        image,
+        (image.naturalWidth - side) / 2,
+        (image.naturalHeight - side) / 2,
+        side,
+        side,
+        0,
+        0,
+        320,
+        320
+      );
+      setEditFormAvatar(canvas.toDataURL('image/jpeg', 0.82));
+      showToast('تم اختيار الصورة من الاستوديو. اضغط حفظ لتثبيتها.', 'info');
+    } catch (error) {
+      setAvatarError(error instanceof Error ? error.message : 'تعذر تجهيز الصورة.');
+    } finally {
+      setIsAvatarProcessing(false);
+    }
   };
 
   const toggleDietaryPref = (diet: string) => {
@@ -1087,6 +1143,46 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                       </button>
                     );
                   })}
+                </div>
+
+                <div className="rounded-2xl border border-dashed border-[#E26D46]/50 bg-white p-3">
+                  <div className="flex items-center gap-3">
+                    <div className="h-14 w-14 shrink-0 overflow-hidden rounded-2xl bg-stone-100 ring-1 ring-stone-200">
+                      {editFormAvatar ? (
+                        <img src={editFormAvatar} alt="معاينة صورة الحساب" className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-stone-400">
+                          <Camera className="h-6 w-6" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <label
+                        htmlFor="profile-avatar-upload"
+                        className={`flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#2D5A46] px-3 py-2.5 text-xs font-bold text-white transition-colors hover:bg-[#234837] ${
+                          isAvatarProcessing ? 'pointer-events-none opacity-60' : ''
+                        }`}
+                      >
+                        <Camera className="h-4 w-4" />
+                        <span>{isAvatarProcessing ? 'جاري تجهيز الصورة...' : 'اختيار صورة من الاستوديو'}</span>
+                      </label>
+                      <input
+                        id="profile-avatar-upload"
+                        type="file"
+                        accept="image/*"
+                        className="sr-only"
+                        disabled={isAvatarProcessing}
+                        onChange={(event) => {
+                          void handleAvatarFile(event.target.files?.[0]);
+                          event.target.value = '';
+                        }}
+                      />
+                      <p className="mt-1 text-[10px] leading-relaxed text-stone-500">
+                        تُقص وتُضغط الصورة تلقائيًا لحفظها بسرعة مع حسابك.
+                      </p>
+                    </div>
+                  </div>
+                  {avatarError && <p role="alert" className="mt-2 text-xs font-bold text-rose-600">{avatarError}</p>}
                 </div>
 
                 {/* Custom Image URL */}

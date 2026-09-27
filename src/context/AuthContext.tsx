@@ -306,14 +306,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (user.isGuest) {
       localStorage.setItem('tabkhat_guest_user', JSON.stringify(updated));
     } else if (firebaseUser) {
-      try {
-        await updateProfile(firebaseUser, { photoURL });
-        if (db) {
-          const userRef = doc(db, 'users', firebaseUser.uid);
-          await setDoc(userRef, { photoURL, updatedAt: serverTimestamp() }, { merge: true });
+      // Firebase Auth profile URLs are intended for ordinary web URLs. Photos
+      // selected from the device are compressed data URLs, so keep those in
+      // the private Firestore profile document instead.
+      if (!photoURL.startsWith('data:image/')) {
+        try {
+          await updateProfile(firebaseUser, { photoURL });
+        } catch (err) {
+          console.warn('Could not update the Firebase Auth photo URL:', err);
         }
-      } catch (err) {
-        console.warn('Error updating photo:', err);
+      }
+
+      if (db) {
+        try {
+          const userRef = doc(db, 'users', firebaseUser.uid);
+          await withTimeout(
+            setDoc(userRef, { photoURL, updatedAt: serverTimestamp() }, { merge: true }),
+            8000
+          );
+        } catch (err) {
+          console.warn('Error updating the profile photo in Firestore:', err);
+          throw err;
+        }
       }
     }
   };
