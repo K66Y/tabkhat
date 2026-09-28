@@ -7,6 +7,7 @@ import {
   IngredientCategory,
 } from '../types/recipe';
 import { parseVoiceRecipe as parseArabicRecipeLocally } from '../utils/voiceRecipeParser';
+import type { ParsedIngredient } from '../utils/arabicRecipeParser';
 import {
   X,
   Plus,
@@ -118,7 +119,7 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
 
   // Ingredients matching screenshot: Name on Right -> Amount -> Unit -> Delete on Left
   const [ingredients, setIngredients] = useState<
-    { id: string; name: string; amount: number | string; unit: string; category: IngredientCategory }[]
+    ParsedIngredient[]
   >([
     { id: '1', name: '', amount: 1, unit: 'كوب', category: 'معلبات ومؤونة' },
     { id: '2', name: '', amount: 2, unit: 'ملعقة كبيرة', category: 'توابل وبهارات' },
@@ -196,6 +197,7 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
   const [descriptionTranscript, setDescriptionTranscript] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState('');
+  const [analysisWarnings, setAnalysisWarnings] = useState<string[]>([]);
   const recognitionRef = useRef<any>(null);
   const recordingModeRef = useRef<'recipe' | 'description' | null>(null);
   const capturedTextRef = useRef('');
@@ -233,6 +235,7 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
               const parsed = parseArabicRecipeLocally(finalText);
               if (parsed.title) setTitle(parsed.title);
               if (parsed.ingredients.length) setIngredients(parsed.ingredients);
+              setAnalysisWarnings(parsed.warnings || []);
               if (parsed.steps.length) setSteps(parsed.steps);
               if (parsed.category) setCategory(parsed.category);
               if (parsed.prepTime) setPrepTime(parsed.prepTime);
@@ -340,6 +343,7 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
 
     // 1. Instantly parse locally using intelligent Arabic extractor
     const localResult = parseArabicRecipeLocally(text);
+    setAnalysisWarnings(localResult.warnings || []);
     if (localResult.title) setTitle(localResult.title);
     if (localResult.category) setCategory(localResult.category);
     if (localResult.prepTime) setPrepTime(localResult.prepTime);
@@ -347,6 +351,7 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
     if (localResult.baseServings) setBaseServings(localResult.baseServings);
     let ingredientCount = localResult.ingredients.length;
     let stepCount = localResult.steps.length;
+    let analysisMode = 'local';
 
     if (localResult.ingredients && localResult.ingredients.length > 0) {
       setIngredients(localResult.ingredients);
@@ -368,6 +373,8 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
         const data = await res.json();
         if (data && data.recipe) {
           const r = data.recipe;
+          analysisMode = r.analysisMode || 'local';
+          setAnalysisWarnings(Array.isArray(r.warnings) ? r.warnings : localResult.warnings || []);
           if (r.title) setTitle(r.title);
           if (r.category) setCategory(r.category as RecipeCategory);
           if (r.cuisine) setCuisine(String(r.cuisine));
@@ -383,9 +390,10 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
               r.ingredients.map((ing: any, i: number) => ({
                 id: 'ing-' + (i + 1),
                 name: ing.name || '',
-                amount: ing.amount !== undefined ? ing.amount : 1,
+                amount: ing.amount ?? '',
                 unit: ing.unit || 'حبة',
                 category: ing.category || 'معلبات ومؤونة',
+                reviewReason: ing.reviewReason,
               }))
             );
           }
@@ -406,7 +414,7 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
       // Keep the actual locally extracted fields if the service is unavailable.
     } finally {
       const message = ingredientCount || stepCount
-        ? `تمت تعبئة ${ingredientCount} مقادير و${stepCount} خطوات. راجع الخانات والكميات قبل الحفظ.`
+        ? `استخرجت ${ingredientCount} مقادير و${stepCount} خطوات.${analysisMode === 'local' ? ' الفهم الذكي غير متاح حاليًا؛ راجع نتيجة الاستخراج الأساسي.' : ''} الكميات غير الواضحة تظهر باللون البرتقالي.`
         : 'لم أستخرج مقادير واضحة. اكتب مثلًا: كوبين رز، نصف كيلو دجاج، ملعقة صغيرة ملح، ثم اضغط تعبئة الخانات.';
       setVoiceStatus(message);
       showToast(message, ingredientCount || stepCount ? 'success' : 'warning');
@@ -512,6 +520,16 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (isRecording || isDescriptionRecording || isAnalyzing) {
+      showToast('انتظر انتهاء التسجيل والتحليل قبل حفظ الوصفة.', 'warning');
+      return;
+    }
+    const needsQuantity = ingredients.find(i => i.name.trim() && (!Number.isFinite(Number(i.amount)) || Number(i.amount) <= 0));
+    if (needsQuantity) {
+      showToast(`حدد الكمية الصحيحة للمكوّن «${needsQuantity.name}» قبل الحفظ.`, 'warning');
+      return;
+    }
+
     if (!title.trim()) {
       showToast('الرجاء كتابة اسم الطبخة / الوصفة', 'warning');
       return;
@@ -522,7 +540,7 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
       .map((i, idx) => ({
         id: 'ing-' + (idx + 1),
         name: i.name.trim(),
-        amount: Number(i.amount) || 1,
+        amount: Number(i.amount),
         unit: i.unit || 'حبة',
         category: i.category || 'معلبات ومؤونة',
       }));
@@ -698,8 +716,12 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
                 onClick={() => void handleAnalyzeWithAI(transcript)}
                 className="rounded-xl bg-[#2D5A46] px-4 py-2 text-xs font-bold text-white disabled:opacity-50">تعبئة الخانات من النص</button>
               {voiceStatus && <p role="status" className="text-xs font-semibold text-stone-700">{voiceStatus}</p>}
+              {analysisWarnings.filter(warning => !ingredients.some(i => warning.startsWith(`${i.name}:`) && Number(i.amount) > 0)).length > 0 && <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                <p className="font-bold">أحتاج تأكيد هذه التفاصيل:</p>
+                {analysisWarnings.filter(warning => !ingredients.some(i => warning.startsWith(`${i.name}:`) && Number(i.amount) > 0)).map((warning, index) => <p key={index}>{warning}</p>)}
+              </div>}
               {!!ingredients.filter(i => i.name.trim()).length && <div className="rounded-xl bg-white p-3 text-xs" aria-label="معاينة المقادير المستخرجة">
-                {ingredients.filter(i => i.name.trim()).map(i => <p key={i.id}>{i.name} — {i.amount} {i.unit} — {i.category}</p>)}
+                {ingredients.filter(i => i.name.trim()).map(i => <p key={i.id}>{i.name} — {i.amount === '' ? 'الكمية تحتاج تأكيد' : `${i.amount} ${i.unit}`} — {i.category}</p>)}
               </div>}
             </div>
           </div>
@@ -1074,14 +1096,18 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
                       min={0.001}
                       step="any"
                       value={ing.amount}
+                      required={!!ing.name.trim()}
+                      aria-label={`كمية ${ing.name || 'المكون'}`}
+                      aria-invalid={!!ing.name.trim() && !(Number(ing.amount) > 0)}
+                      placeholder="الكمية؟"
                       onChange={(e) => {
-                        const val = Number(e.target.value) || 0;
+                        const val = e.target.value === '' ? '' : Number(e.target.value);
                         setIngredients((prev) =>
-                          prev.map((i) => (i.id === ing.id ? { ...i, amount: val } : i))
+                          prev.map((i) => (i.id === ing.id ? { ...i, amount: val, reviewReason: undefined } : i))
                         );
                       }}
                       title="العدد أو الكمية (مثلاً 3 بيضات)"
-                      className="w-full py-2 text-center rounded-xl bg-stone-50 border border-stone-200 text-xs font-bold text-[#242A26] focus:outline-none"
+                      className={`w-full py-2 text-center rounded-xl border text-sm font-bold text-[#242A26] focus:outline-none ${ing.amount === '' ? 'bg-amber-50 border-amber-500' : 'bg-stone-50 border-stone-200'}`}
                     />
                   </div>
 
@@ -1101,6 +1127,7 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
                       <option value="كوب">كوب</option>
                       <option value="ملعقة كبيرة">ملعقة كبيرة</option>
                       <option value="ملعقة صغيرة">ملعقة صغيرة</option>
+                      <option value="ملعقة">ملعقة (الحجم غير محدد)</option>
                       <option value="جرام">جرام</option>
                       <option value="كيلو">كيلو</option>
                       <option value="فص">فص</option>

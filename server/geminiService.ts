@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import { parseVoiceRecipe } from '../src/utils/voiceRecipeParser.ts';
+import { validateVoiceRecipe } from '../src/utils/validateVoiceRecipe.ts';
 
 // Initialize the Google Gen AI client with environment key
 const apiKey = process.env.GEMINI_API_KEY || '';
@@ -51,7 +52,8 @@ export async function parseRecipeFromSpokenText(spokenText: string) {
 8. استخراج كل المقادير بدقة مع تقسيمها إلى: name (اسم المكون فقط بدون كمية)، amount (رقم مثل 1 أو 2 أو 0.5)، unit (الوحدة مثل كوب، ملعقة كبيرة، حبة، جرام، كيلو، رشة)، category (من: خضار وفواكه، لحوم ودواجن، توابل وبهارات، معلبات ومؤونة، ألبان وأجبان، أخرى).
 9. ترتيب خطوات التحضير رقمياً بنظام متسلسل وواضح، وإذا كانت أي خطوة تتطلب وقتاً (مثل "اتركه يغلي 20 دقيقة" أو "حمره 10 دقائق") ضع timerMinutes بدقة.
 10. لا تغيّر صورة المستخدم ولا تخترع روابط صور.
-قواعد ملزمة: استخرج المقادير والكميات والخطوات المذكورة فقط. لا تضف مكونات أو خطوات عامة أو بدائل غير مذكورة. اترك مصفوفة المقادير أو الخطوات فارغة عند غيابها. الوصف له تسجيل مستقل فلا تضع الإملاء في الوصف. لا تخترع وقتًا أو سعرات أو حصصًا: استخدم 0 للأرقام غير المذكورة وسلسلة فارغة للنصوص غير المذكورة.`;
+قواعد ملزمة: استخرج المقادير والكميات والخطوات المذكورة فقط. لا تضف مكونات أو خطوات عامة أو بدائل غير مذكورة. اترك مصفوفة المقادير أو الخطوات فارغة عند غيابها. الوصف له تسجيل مستقل فلا تضع الإملاء في الوصف. لا تخترع وقتًا أو سعرات أو حصصًا: استخدم 0 للأرقام غير المذكورة وسلسلة فارغة للنصوص غير المذكورة.
+افهم العامية السعودية: «طبخت كبسة دجاج» اسم طبق وليس مكونًا. «حطيت» و«ضفت» تفصل إضافات المقادير. «ثلاث كاسات موية على أربع كاسات رز» تعني ماء 3 أكواب ورز 4 أكواب. لا تستنتج كمية دجاج من اسم الطبق. الكسر المشوّه مثل «4\\1» غير مؤكد، استخدم null لكمية هذا المكون. «ربع ملعقة» تعني 0.25. لا تفترض حجم الملعقة إن لم يذكره المستخدم. إذا لم تُذكر كمية فضع null. لا تضع «حطيت» أو اسم الطبخة أو جملة كاملة في name.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -82,7 +84,7 @@ export async function parseRecipeFromSpokenText(spokenText: string) {
                 type: Type.OBJECT,
                 properties: {
                   name: { type: Type.STRING },
-                  amount: { type: Type.NUMBER },
+                  amount: { type: Type.NUMBER, nullable: true },
                   unit: { type: Type.STRING },
                   category: {
                     type: Type.STRING,
@@ -122,11 +124,7 @@ export async function parseRecipeFromSpokenText(spokenText: string) {
       },
     });
 
-    const parsed = JSON.parse(response.text || '{}');
-    if (!parsed.imageUrl) {
-      parsed.imageUrl = 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=1200&q=80';
-    }
-    return parsed as ParsedRecipeResult;
+    return validateVoiceRecipe(JSON.parse(response.text || '{}'), spokenText);
   } catch (err) {
     console.error('Gemini recipe parse error, using heuristic fallback:', err);
     return parseVoiceRecipe(spokenText);

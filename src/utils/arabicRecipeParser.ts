@@ -10,6 +10,7 @@ export interface ParsedIngredient {
   amount: number | string;
   unit: string;
   category: IngredientCategory;
+  reviewReason?: string;
 }
 
 export interface ParsedStep {
@@ -29,6 +30,8 @@ export interface ParsedRecipeOutput {
   difficulty?: DifficultyLevel;
   ingredients: ParsedIngredient[];
   steps: ParsedStep[];
+  warnings?: string[];
+  analysisMode?: 'local' | 'ai';
 }
 
 // Convert Eastern Arabic numerals (١، ٢، ٣) to Western (1, 2, 3)
