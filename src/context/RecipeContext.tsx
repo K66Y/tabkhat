@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 import {
   Recipe,
   ShoppingItem,
@@ -8,9 +8,7 @@ import {
 } from '../types/recipe';
 import { INITIAL_RECIPES } from '../data/seedRecipes';
 import { useAuth } from './AuthContext';
-import { db } from '../lib/firebase';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { withTimeout } from '../lib/async';
+import { useAccountData } from './useAccountData';
 
 export interface ActiveTimer {
   id: string;
@@ -31,6 +29,11 @@ interface ToastInfo {
 interface RecipeContextType {
   dataSyncStatus: 'local' | 'syncing' | 'synced' | 'error';
   isUserDataLoading: boolean;
+  userDataError: string;
+  dataSyncError: string;
+  retryUserData: () => void;
+  flushPendingChanges: () => Promise<void>;
+  exportBackup: () => void;
   recipes: Recipe[];
   myRecipes: Recipe[];
   favorites: string[];
@@ -72,15 +75,6 @@ interface RecipeContextType {
   deletedRecipeCount: number;
 }
 
-interface UserDataSnapshot {
-  schemaVersion: number;
-  recipes: Recipe[];
-  favorites: string[];
-  mealPlan: DayMealPlan[];
-  shoppingList: ShoppingItem[];
-  deletedRecipeCount: number;
-}
-
 const DAYS_OF_WEEK = [
   'السبت',
   'الأحد',
@@ -91,279 +85,28 @@ const DAYS_OF_WEEK = [
   'الجمعة',
 ];
 
-const INITIAL_EMPTY_PLAN: DayMealPlan[] = DAYS_OF_WEEK.map((day) => ({
-  day,
-  meals: {},
-}));
-
 const RecipeContext = createContext<RecipeContextType | undefined>(undefined);
 
 export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, firebaseUser } = useAuth();
-  const [dataSyncStatus, setDataSyncStatus] = useState<'local' | 'syncing' | 'synced' | 'error'>('local');
-  const [isUserDataLoading, setIsUserDataLoading] = useState(true);
-  const hydratedUserRef = useRef<string | null>(null);
-
-  const [recipes, setRecipes] = useState<Recipe[]>(() => {
-    let custom: Recipe[] = [];
-    const saved = localStorage.getItem('tabkhat_custom_recipes');
-    if (saved) {
-      try {
-        custom = JSON.parse(saved);
-      } catch {
-        custom = [];
-      }
-    } else {
-      // Seed initial personal recipe for "وصفاتي"
-      const sampleMyRecipe: Recipe = {
-        id: 'custom-sample-1',
-        title: 'صينية دجاج بالبطاطس والثوم والليمون',
-        description: 'وصفة عائلية خاصة وسريعة، دجاج متبل بخلطة الليمون وزيت الزيتون والكزبرة والبطاطس المحمرة بالفرن.',
-        category: 'أطباق رئيسية',
-        cuisine: 'سعودي',
-        prepTime: 15,
-        cookTime: 35,
-        difficulty: 'سهل',
-        baseServings: 4,
-        calories: 460,
-        imageUrl: 'https://images.unsplash.com/photo-1598103442097-8b74394b95c6?auto=format&fit=crop&w=1200&q=80',
-        isFeatured: false,
-        tags: ['وصفاتي', 'عائلية', 'دجاج', 'صينية بالفرن'],
-        authorName: 'أنا',
-        createdAt: new Date().toISOString(),
-        ingredients: [
-          { id: 'my1', name: 'صدور أو أفخاذ دجاج نظيفة', amount: 800, unit: 'جرام', category: 'لحوم ودواجن' },
-          { id: 'my2', name: 'بطاطس مقطعة شرائح سميكة', amount: 3, unit: 'حبة', category: 'خضار وفواكه' },
-          { id: 'my3', name: 'عصير ليمون طازج وبشر ليمونة', amount: 4, unit: 'ملعقة كبيرة', category: 'خضار وفواكه' },
-          { id: 'my4', name: 'زيت زيتون بكر ممتاز', amount: 3, unit: 'ملعقة كبيرة', category: 'معلبات ومؤونة' },
-          { id: 'my5', name: 'ثوم مهروس مع كزبرة يابسة', amount: 1, unit: 'ملعقة كبيرة', category: 'توابل وبهارات' },
-        ],
-        steps: [
-          { stepNumber: 1, instruction: 'خلط زيت الزيتون مع عصير الليمون والثوم والكزبرة والملح والفلفل الأسود في وعاء لتجهيز التتبيلة.', timerMinutes: 3 },
-          { stepNumber: 2, instruction: 'رص شرائح البطاطس وقطع الدجاج في صينية بايركس وتوزيع التتبيلة فوقها بالتساوي.', timerMinutes: 5 },
-          { stepNumber: 3, instruction: 'تغطية الصينية بورق قصدير وإدخالها فرناً ساخناً على 200 مئوية لمدة 30 دقيقة.', timerMinutes: 30 },
-          { stepNumber: 4, instruction: 'رفع القصدير وتحمير الوجه تحت الشواية لمدة 5 دقائق حتى يكتسب لوناً ذهبياً شهياً.', timerMinutes: 5 },
-        ],
-      };
-      custom = [sampleMyRecipe];
-      localStorage.setItem('tabkhat_custom_recipes', JSON.stringify(custom));
-    }
-
-    const deletedIds: string[] = JSON.parse(localStorage.getItem('tabkhat_deleted_recipe_ids') || '[]');
-    const editedMap: Record<string, Partial<Recipe>> = JSON.parse(
-      localStorage.getItem('tabkhat_edited_recipes') || '{}'
-    );
-    const all = [...custom, ...INITIAL_RECIPES].map((r) =>
-      editedMap[r.id] ? { ...r, ...editedMap[r.id] } : r
-    );
-    return all.filter((r) => !deletedIds.includes(r.id));
-  });
-
-  const [deletedRecipeCount, setDeletedRecipeCount] = useState<number>(() => {
-    try {
-      const ids: string[] = JSON.parse(localStorage.getItem('tabkhat_deleted_recipe_ids') || '[]');
-      return ids.length;
-    } catch {
-      return 0;
-    }
-  });
-
-  const [favorites, setFavorites] = useState<string[]>(() => {
-    const saved = localStorage.getItem('tabkhat_favorites');
-    return saved ? JSON.parse(saved) : ['kabsa-chicken-1', 'saleeg-taifi-2'];
-  });
-
-  const [mealPlan, setMealPlan] = useState<DayMealPlan[]>(() => {
-    const saved = localStorage.getItem('tabkhat_meal_plan');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {
-        return INITIAL_EMPTY_PLAN;
-      }
-    }
-    // Seed initial plan with 3 realistic entries for rich immediate impression
-    const seeded = [...INITIAL_EMPTY_PLAN];
-    seeded[0].meals['غداء'] = INITIAL_RECIPES[0]; // السبت غداء كبسة
-    seeded[1].meals['فطور'] = INITIAL_RECIPES[3]; // الأحد فطور شكشوكة
-    seeded[2].meals['عشاء'] = INITIAL_RECIPES[8]; // الإثنين عشاء مطبق
-    return seeded;
-  });
-
-  const [shoppingList, setShoppingList] = useState<ShoppingItem[]>(() => {
-    const saved = localStorage.getItem('tabkhat_shopping_list');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {
-        return [];
-      }
-    }
-    // Initial sample items
-    return [
-      { id: 'sh-1', name: 'أرز بسمتي', amount: '2 كيلو', category: 'معلبات ومؤونة', completed: false, addedAt: Date.now() - 3600000 },
-      { id: 'sh-2', name: 'طماطم طازجة', amount: '1 كيلو', category: 'خضار وفواكه', completed: true, addedAt: Date.now() - 7200000 },
-      { id: 'sh-3', name: 'بهارات كبسة مشكلة', amount: 'علبة', category: 'توابل وبهارات', completed: false, addedAt: Date.now() - 1000000 },
-    ];
-  });
+  const {
+    data: { recipes, favorites, mealPlan, shoppingList, deletedRecipeCount },
+    setRecipes, setFavorites, setMealPlan, setShoppingList, setDeletedRecipeCount,
+    dataSyncStatus, isUserDataLoading, userDataError, dataSyncError,
+    retryUserData, flushPendingChanges, exportBackup,
+  } = useAccountData(firebaseUser?.uid);
 
   const [activeTimers, setActiveTimers] = useState<ActiveTimer[]>([]);
   const [toast, setToast] = useState<ToastInfo | null>(null);
   const [selectedRecipeForDetail, setSelectedRecipeForDetail] = useState<Recipe | null>(null);
   const [selectedRecipeForPlan, setSelectedRecipeForPlan] = useState<Recipe | null>(null);
 
-  const createSnapshot = (): UserDataSnapshot => ({
-    schemaVersion: 1,
-    recipes,
-    favorites,
-    mealPlan,
-    shoppingList,
-    deletedRecipeCount,
-  });
-
-  const applySnapshot = (snapshot: Partial<UserDataSnapshot>) => {
-    if (Array.isArray(snapshot.recipes)) setRecipes(snapshot.recipes);
-    if (Array.isArray(snapshot.favorites)) setFavorites(snapshot.favorites);
-    if (Array.isArray(snapshot.mealPlan)) setMealPlan(snapshot.mealPlan);
-    if (Array.isArray(snapshot.shoppingList)) setShoppingList(snapshot.shoppingList);
-    if (typeof snapshot.deletedRecipeCount === 'number') {
-      setDeletedRecipeCount(snapshot.deletedRecipeCount);
-    }
-  };
-
-  // Hydrate a separate local/cloud snapshot for every account. This prevents
-  // data from one signed-in user appearing in another user's session.
   useEffect(() => {
-    const uid = user?.uid;
-    if (!uid) return;
-
-    let cancelled = false;
-    const previousUid = hydratedUserRef.current;
-    hydratedUserRef.current = null;
-    setIsUserDataLoading(true);
-    setDataSyncStatus(firebaseUser?.uid === uid ? 'syncing' : 'local');
-
-    const hydrate = async () => {
-      const storageKey = `tabkhat_user_data_${uid}`;
-      let snapshot: Partial<UserDataSnapshot> | null = null;
-      let hasUnifiedCloudData = false;
-
-      try {
-        const saved = localStorage.getItem(storageKey);
-        if (saved) snapshot = JSON.parse(saved);
-      } catch {
-        localStorage.removeItem(storageKey);
-      }
-
-      if (firebaseUser?.uid === uid && db) {
-        try {
-          const cloudDoc = await withTimeout(getDoc(doc(db, 'userData', uid)), 8000);
-          if (cloudDoc.exists()) {
-            snapshot = cloudDoc.data() as UserDataSnapshot;
-            hasUnifiedCloudData = true;
-          } else {
-            // One-time migration from the older three-document layout.
-            const [favDoc, planDoc, shopDoc] = await withTimeout(Promise.all([
-              getDoc(doc(db, 'favorites', uid)),
-              getDoc(doc(db, 'mealPlans', uid)),
-              getDoc(doc(db, 'shoppingList', uid)),
-            ]), 8000);
-            snapshot = {
-              ...(snapshot || {}),
-              ...(favDoc.exists() && Array.isArray(favDoc.data().ids)
-                ? { favorites: favDoc.data().ids }
-                : {}),
-              ...(planDoc.exists() && Array.isArray(planDoc.data().plan)
-                ? { mealPlan: planDoc.data().plan }
-                : {}),
-              ...(shopDoc.exists() && Array.isArray(shopDoc.data().items)
-                ? { shoppingList: shopDoc.data().items }
-                : {}),
-            };
-          }
-        } catch (error) {
-          console.warn('Could not load the unified user data snapshot:', error);
-          setDataSyncStatus('error');
-        }
-      }
-
-      if (cancelled) return;
-      const mayMigrateCurrentData = !previousUid || previousUid.startsWith('guest-');
-      const cleanAccountSnapshot: UserDataSnapshot = {
-        schemaVersion: 1,
-        recipes: INITIAL_RECIPES,
-        favorites: [],
-        mealPlan: INITIAL_EMPTY_PLAN,
-        shoppingList: [],
-        deletedRecipeCount: 0,
-      };
-      const completeSnapshot: UserDataSnapshot = {
-        ...(mayMigrateCurrentData ? createSnapshot() : cleanAccountSnapshot),
-        ...(snapshot || {}),
-        schemaVersion: 1,
-      };
-      applySnapshot(completeSnapshot);
-      localStorage.setItem(storageKey, JSON.stringify(completeSnapshot));
-      hydratedUserRef.current = uid;
-
-      if (firebaseUser?.uid === uid && db) {
-        if (!hasUnifiedCloudData) {
-          try {
-            await withTimeout(setDoc(doc(db, 'userData', uid), {
-              ...JSON.parse(JSON.stringify(completeSnapshot)),
-              updatedAt: serverTimestamp(),
-            }), 8000);
-          } catch (error) {
-            console.warn('Could not create the unified user data snapshot:', error);
-            setDataSyncStatus('error');
-            setIsUserDataLoading(false);
-            return;
-          }
-        }
-        setDataSyncStatus('synced');
-      } else {
-        setDataSyncStatus('local');
-      }
-      setIsUserDataLoading(false);
-    };
-
-    hydrate();
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.uid, firebaseUser?.uid]);
-
-  // Persist the complete user-owned state locally and, for authenticated
-  // accounts, to a single Firestore document. Debouncing keeps writes small.
-  useEffect(() => {
-    const uid = user?.uid;
-    if (!uid || hydratedUserRef.current !== uid) return;
-
-    const snapshot = createSnapshot();
-    const safeSnapshot = JSON.parse(JSON.stringify(snapshot)) as UserDataSnapshot;
-    localStorage.setItem(`tabkhat_user_data_${uid}`, JSON.stringify(safeSnapshot));
-
-    if (firebaseUser?.uid !== uid || !db) {
-      setDataSyncStatus('local');
-      return;
-    }
-
-    setDataSyncStatus('syncing');
-    const timer = window.setTimeout(async () => {
-      try {
-        await setDoc(doc(db!, 'userData', uid), {
-          ...safeSnapshot,
-          updatedAt: serverTimestamp(),
-        });
-        setDataSyncStatus('synced');
-      } catch (error) {
-        console.warn('Could not sync the unified user data snapshot:', error);
-        setDataSyncStatus('error');
-      }
-    }, 700);
-
-    return () => window.clearTimeout(timer);
-  }, [user?.uid, firebaseUser?.uid, recipes, favorites, mealPlan, shoppingList, deletedRecipeCount]);
+    setSelectedRecipeForDetail(null);
+    setSelectedRecipeForPlan(null);
+    setActiveTimers([]);
+    setToast(null);
+  }, [firebaseUser?.uid]);
 
   // Show Toast helper
   const showToast = (message: string, type: 'success' | 'info' | 'warning' = 'success') => {
@@ -372,55 +115,6 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setTimeout(() => {
       setToast((curr) => (curr?.id === id ? null : curr));
     }, 3200);
-  };
-
-  // Sync to local storage
-  useEffect(() => {
-    localStorage.setItem('tabkhat_favorites', JSON.stringify(favorites));
-  }, [favorites]);
-
-  useEffect(() => {
-    localStorage.setItem('tabkhat_meal_plan', JSON.stringify(mealPlan));
-  }, [mealPlan]);
-
-  useEffect(() => {
-    localStorage.setItem('tabkhat_shopping_list', JSON.stringify(shoppingList));
-  }, [shoppingList]);
-
-  // Sync favorites to Firestore when changed
-  const saveFavoritesToCloud = async (newFavs: string[]) => {
-    const firestore = db;
-    if (firebaseUser && firestore) {
-      try {
-        await setDoc(doc(firestore, 'favorites', firebaseUser.uid), { ids: newFavs, updatedAt: new Date().toISOString() });
-      } catch (e) {
-        console.warn('Cloud sync error for favorites', e);
-      }
-    }
-  };
-
-  // Sync meal plan to Firestore
-  const savePlanToCloud = async (newPlan: DayMealPlan[]) => {
-    const firestore = db;
-    if (firebaseUser && firestore) {
-      try {
-        await setDoc(doc(firestore, 'mealPlans', firebaseUser.uid), { plan: newPlan, updatedAt: new Date().toISOString() });
-      } catch (e) {
-        console.warn('Cloud sync error for meal plan', e);
-      }
-    }
-  };
-
-  // Sync shopping list to Firestore
-  const saveShoppingToCloud = async (newItems: ShoppingItem[]) => {
-    const firestore = db;
-    if (firebaseUser && firestore) {
-      try {
-        await setDoc(doc(firestore, 'shoppingList', firebaseUser.uid), { items: newItems, updatedAt: new Date().toISOString() });
-      } catch (e) {
-        console.warn('Cloud sync error for shopping list', e);
-      }
-    }
   };
 
   // Active timers countdown tick
@@ -475,7 +169,7 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setFavorites((prev) => {
       const exists = prev.includes(recipeId);
       const next = exists ? prev.filter((id) => id !== recipeId) : [...prev, recipeId];
-      saveFavoritesToCloud(next);
+
       showToast(exists ? 'تمت الإزالة من المفضلة' : '❤️ تم الحفظ في المفضلة', 'success');
       return next;
     });
@@ -484,7 +178,7 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const isFavorite = (recipeId: string) => favorites.includes(recipeId);
 
   const addRecipe = (recipeData: Omit<Recipe, 'id'>): Recipe => {
-    const newId = 'custom-' + Date.now();
+    const newId = 'custom-' + crypto.randomUUID();
     const newRecipe: Recipe = {
       ...recipeData,
       id: newId,
@@ -495,12 +189,11 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     setRecipes((prev) => {
       const updated = [newRecipe, ...prev];
-      const customOnly = updated.filter((r) => r.id.startsWith('custom-'));
-      localStorage.setItem('tabkhat_custom_recipes', JSON.stringify(customOnly));
+
       return updated;
     });
 
-    showToast('🎉 تم حفظ الوصفة بنجاح في مجموعتك!', 'success');
+    showToast('أُضيفت الوصفة؛ انتظر تأكيد الحفظ السحابي أعلى الشاشة.', 'success');
     return newRecipe;
   };
 
@@ -513,16 +206,7 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return r;
       });
 
-      // Save custom recipes if applicable
-      const customOnly = updated.filter((r) => r.id.startsWith('custom-'));
-      localStorage.setItem('tabkhat_custom_recipes', JSON.stringify(customOnly));
 
-      // Persist edited map for all recipes
-      const editedMap: Record<string, Partial<Recipe>> = JSON.parse(
-        localStorage.getItem('tabkhat_edited_recipes') || '{}'
-      );
-      editedMap[recipeId] = { ...(editedMap[recipeId] || {}), ...updatedFields };
-      localStorage.setItem('tabkhat_edited_recipes', JSON.stringify(editedMap));
 
       return updated;
     });
@@ -543,35 +227,30 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         });
         return { ...day, meals: nextMeals };
       });
-      localStorage.setItem('tabkhat_meal_plan', JSON.stringify(next));
-      savePlanToCloud(next);
+
+
       return next;
     });
 
-    showToast('✨ تم تعديل وحفظ بيانات الطبخة بنجاح!', 'success');
+    showToast('تم التعديل؛ جاري تأكيد الحفظ السحابي.', 'success');
   };
 
   const deleteRecipe = (recipeId: string) => {
     // 1. Remove from recipes and persist deletion
     setRecipes((prev) => {
       const updated = prev.filter((r) => r.id !== recipeId);
-      const customOnly = updated.filter((r) => r.id.startsWith('custom-'));
-      localStorage.setItem('tabkhat_custom_recipes', JSON.stringify(customOnly));
 
-      const deletedIds: string[] = JSON.parse(localStorage.getItem('tabkhat_deleted_recipe_ids') || '[]');
-      if (!deletedIds.includes(recipeId)) {
-        deletedIds.push(recipeId);
-        localStorage.setItem('tabkhat_deleted_recipe_ids', JSON.stringify(deletedIds));
-        setDeletedRecipeCount(deletedIds.length);
-      }
+
       return updated;
     });
+
+    setDeletedRecipeCount(count => count + 1);
 
     // 2. Remove from favorites
     setFavorites((prev) => {
       const next = prev.filter((id) => id !== recipeId);
-      localStorage.setItem('tabkhat_favorites', JSON.stringify(next));
-      saveFavoritesToCloud(next);
+
+
       return next;
     });
 
@@ -586,8 +265,8 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         });
         return { ...day, meals: newMeals };
       });
-      localStorage.setItem('tabkhat_meal_plan', JSON.stringify(next));
-      savePlanToCloud(next);
+
+
       return next;
     });
 
@@ -603,26 +282,17 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   const restoreDefaultRecipes = () => {
-    localStorage.removeItem('tabkhat_deleted_recipe_ids');
-    localStorage.removeItem('tabkhat_edited_recipes');
+
+
     setDeletedRecipeCount(0);
-    let custom: Recipe[] = [];
-    const saved = localStorage.getItem('tabkhat_custom_recipes');
-    if (saved) {
-      try {
-        custom = JSON.parse(saved);
-      } catch {
-        custom = [];
-      }
-    }
-    setRecipes([...custom, ...INITIAL_RECIPES]);
+    setRecipes(previous => [...previous.filter(r => r.id.startsWith('custom-')), ...INITIAL_RECIPES]);
     showToast('✨ تم استعادة جميع وصفات التطبيق الافتراضية بنجاح!', 'success');
   };
 
   const clearFavorites = () => {
     setFavorites([]);
-    localStorage.setItem('tabkhat_favorites', JSON.stringify([]));
-    saveFavoritesToCloud([]);
+
+
     showToast('تم تفريغ قائمة المفضلة بالكامل', 'info');
   };
 
@@ -632,15 +302,15 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       meals: {},
     }));
     setMealPlan(emptyPlan);
-    localStorage.setItem('tabkhat_meal_plan', JSON.stringify(emptyPlan));
-    savePlanToCloud(emptyPlan);
+
+
     showToast('تم تفريغ جدول الطبخ بالكامل', 'info');
   };
 
   const clearMyRecipes = () => {
     setRecipes((prev) => {
       const remaining = prev.filter((r) => !r.id.startsWith('custom-') && (!user?.uid || r.authorId !== user.uid));
-      localStorage.setItem('tabkhat_custom_recipes', JSON.stringify([]));
+
       return remaining;
     });
     showToast('تم حذف كافة وصفاتك الخاصة', 'info');
@@ -649,25 +319,22 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const deleteAllRecipes = () => {
     // Record all IDs in deleted list
     const allIds = recipes.map((r) => r.id);
-    const existingDeleted: string[] = JSON.parse(localStorage.getItem('tabkhat_deleted_recipe_ids') || '[]');
-    const merged = Array.from(new Set([...existingDeleted, ...allIds, ...INITIAL_RECIPES.map((r) => r.id)]));
-    localStorage.setItem('tabkhat_deleted_recipe_ids', JSON.stringify(merged));
-    localStorage.setItem('tabkhat_custom_recipes', JSON.stringify([]));
-    localStorage.setItem('tabkhat_favorites', JSON.stringify([]));
     setRecipes([]);
     setFavorites([]);
-    setDeletedRecipeCount(merged.length);
-    saveFavoritesToCloud([]);
+    setDeletedRecipeCount(count => count + allIds.length);
+    clearMealPlan();
+    setSelectedRecipeForDetail(null);
+
     showToast('🗑️ تم حذف جميع الأكلات والطبخات من التطبيق بنجاح', 'info');
   };
 
   const resetAllUserData = () => {
-    localStorage.removeItem('tabkhat_custom_recipes');
-    localStorage.removeItem('tabkhat_favorites');
-    localStorage.removeItem('tabkhat_meal_plan');
-    localStorage.removeItem('tabkhat_shopping_list');
-    localStorage.removeItem('tabkhat_deleted_recipe_ids');
-    localStorage.removeItem('tabkhat_edited_recipes');
+
+
+
+
+
+
 
     const emptyPlan: DayMealPlan[] = DAYS_OF_WEEK.map((day) => ({
       day,
@@ -679,9 +346,9 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setMealPlan(emptyPlan);
     setShoppingList([]);
     setDeletedRecipeCount(0);
-    saveFavoritesToCloud([]);
-    savePlanToCloud(emptyPlan);
-    saveShoppingToCloud([]);
+
+
+
     showToast('⚠️ تم مسح وتصفير كافة تفاصيل وبيانات الحساب', 'warning');
   };
 
@@ -703,7 +370,7 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
         return d;
       });
-      savePlanToCloud(updated);
+
       showToast(`تمت إضافة ${recipe.title} لـ ${mealType} يوم ${day}`, 'success');
       return updated;
     });
@@ -722,7 +389,7 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
         return d;
       });
-      savePlanToCloud(updated);
+
       showToast('تم حذف الوجبة من الجدول', 'info');
       return updated;
     });
@@ -748,7 +415,7 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }));
 
     setMealPlan(newPlan);
-    savePlanToCloud(newPlan);
+
     showToast('✨ تم اقتراح جدول أسبوعي متكامل ومتنوع!', 'success');
   };
 
@@ -796,7 +463,7 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setShoppingList((prev) => {
       // Append non-duplicate or keep list
       const combined = [...newItems, ...prev];
-      saveShoppingToCloud(combined);
+
       return combined;
     });
   };
@@ -813,7 +480,7 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     setShoppingList((prev) => {
       const next = [newItem, ...prev];
-      saveShoppingToCloud(next);
+
       return next;
     });
     showToast(`تمت إضافة "${name}" للمشتريات`, 'success');
@@ -822,7 +489,7 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const toggleShoppingItem = (id: string) => {
     setShoppingList((prev) => {
       const next = prev.map((item) => (item.id === id ? { ...item, completed: !item.completed } : item));
-      saveShoppingToCloud(next);
+
       return next;
     });
   };
@@ -830,7 +497,7 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const removeShoppingItem = (id: string) => {
     setShoppingList((prev) => {
       const next = prev.filter((item) => item.id !== id);
-      saveShoppingToCloud(next);
+
       return next;
     });
   };
@@ -838,7 +505,7 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const clearCompletedShoppingItems = () => {
     setShoppingList((prev) => {
       const next = prev.filter((item) => !item.completed);
-      saveShoppingToCloud(next);
+
       showToast('تم حذف الأصناف المكتملة', 'info');
       return next;
     });
@@ -846,7 +513,7 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const clearAllShoppingList = () => {
     setShoppingList([]);
-    saveShoppingToCloud([]);
+
     showToast('تم مسح قائمة المشتريات بالكامل', 'info');
   };
 
@@ -948,6 +615,7 @@ export const RecipeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       value={{
         dataSyncStatus,
         isUserDataLoading,
+        userDataError, dataSyncError, retryUserData, flushPendingChanges, exportBackup,
         recipes,
         myRecipes,
         favorites,

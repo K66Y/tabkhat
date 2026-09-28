@@ -134,11 +134,34 @@ const LoginGate: React.FC = () => {
 };
 
 const AppGate: React.FC = () => {
-  const { firebaseUser, isLoading } = useAuth();
-  const { isUserDataLoading } = useRecipes();
+  const { firebaseUser, isLoading, profileError, retryProfile, logout } = useAuth();
+  const { isUserDataLoading, userDataError, retryUserData, exportBackup } = useRecipes();
   if (isLoading || (firebaseUser && isUserDataLoading)) return <SplashScreen />;
   if (!firebaseUser) return <LoginGate />;
+  if (profileError || userDataError) return (
+    <div dir="rtl" className="min-h-screen flex items-center justify-center bg-[#FAF8F5] p-6">
+      <div className="max-w-md space-y-5 text-center">
+        <PotLogo size={80} className="mx-auto" />
+        <p role="alert">{profileError || userDataError}</p>
+        <button className="rounded-xl bg-[#2D5A46] p-3 text-white" onClick={() => { retryProfile(); retryUserData(); }}>إعادة المحاولة</button>
+        <button className="block mx-auto underline" onClick={exportBackup}>تنزيل نسخة التعديلات الاحتياطية</button>
+        <button className="block mx-auto" onClick={() => void logout().catch(() => {})}>العودة لتسجيل الدخول</button>
+      </div>
+    </div>
+  );
   return <TabkhatMain />;
+};
+
+const CloudSaveStatus: React.FC = () => {
+  const { dataSyncStatus, dataSyncError, flushPendingChanges, exportBackup } = useRecipes();
+  return <div role="status" className={`px-4 py-2 text-center text-xs ${dataSyncStatus === 'error' || dataSyncError ? 'bg-rose-50 text-rose-800' : 'bg-emerald-50 text-emerald-900'}`}>
+    {dataSyncStatus === 'synced' ? 'تم حفظ بياناتك على حسابك ✓' : dataSyncStatus === 'syncing' ? 'جاري الحفظ على حسابك… انتظر التأكيد قبل إغلاق التطبيق' : 'لم يكتمل الحفظ السحابي'}
+    {dataSyncError && <p>{dataSyncError}</p>}
+    {(dataSyncStatus === 'error' || dataSyncError) && <span className="inline-flex gap-4 mt-2">
+      <button className="underline" onClick={() => void flushPendingChanges().catch(() => {})}>إعادة محاولة الحفظ</button>
+      <button className="underline" onClick={exportBackup}>تنزيل نسخة احتياطية</button>
+    </span>}
+  </div>;
 };
 
 const TabkhatMain: React.FC = () => {
@@ -213,6 +236,7 @@ const TabkhatMain: React.FC = () => {
       />
 
       {/* Main Content Viewport */}
+      <CloudSaveStatus />
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-3 sm:py-5">
         {/* 1. الرئيسية */}
         {currentTab === 'home' && (

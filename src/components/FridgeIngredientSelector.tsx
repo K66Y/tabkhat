@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { apiHeaders } from '../lib/apiHeaders';
 import { useRecipes } from '../context/RecipeContext';
 import { Recipe } from '../types/recipe';
 import {
@@ -107,7 +108,7 @@ export const FridgeIngredientSelector: React.FC<FridgeIngredientSelectorProps> =
     try {
       const res = await fetch('/api/fridge-suggest', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await apiHeaders(),
         body: JSON.stringify({ ingredients: selectedIngredients }),
       });
 

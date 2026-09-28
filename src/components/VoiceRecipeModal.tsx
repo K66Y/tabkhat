@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { apiHeaders } from '../lib/apiHeaders';
+import { prepareRecipeImage } from '../lib/recipeImage';
 import { useRecipes } from '../context/RecipeContext';
 import {
   Recipe,
@@ -368,7 +370,7 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
     try {
       const res = await fetch('/api/parse-recipe', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await apiHeaders(),
         body: JSON.stringify({ text }),
         signal: AbortSignal.timeout(10000),
       });
@@ -462,18 +464,13 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
   };
 
   // Handle local image upload
-  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (uploadEvent) => {
-        if (uploadEvent.target?.result) {
-          setImageUrl(uploadEvent.target.result as string);
-          showToast('تم رفع وتحديث صورة وصفتك بنجاح', 'success');
-        }
-      };
-      reader.readAsDataURL(file);
-    }
+    if (!file) return;
+    try {
+      setImageUrl(await prepareRecipeImage(file));
+      showToast('تم تجهيز الصورة. احفظ الوصفة لرفعها على حسابك.', 'info');
+    } catch (error) { showToast(error instanceof Error ? error.message : 'تعذر تجهيز الصورة.', 'warning'); }
   };
 
   // Handle apply custom image URL

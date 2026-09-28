@@ -58,12 +58,14 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     updatePreferences,
     updateProfileName,
     updateProfilePhoto,
+    updateProfileDetails,
     clearDietaryPreferences,
     deleteAccountDetails,
   } = useAuth();
 
   const {
     dataSyncStatus,
+    flushPendingChanges,
     recipes,
     myRecipes,
     favorites,
@@ -195,24 +197,34 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
 
   const handleSaveName = async () => {
     if (!editNameValue.trim()) return;
-    await updateProfileName(editNameValue.trim());
-    setIsEditingName(false);
-    showToast('تم تحديث الاسم بنجاح', 'success');
+    try {
+      await updateProfileName(editNameValue.trim());
+      setIsEditingName(false);
+      showToast('تم تحديث الاسم بنجاح', 'success');
+    } catch { showToast('لم يتم حفظ الاسم. تحقق من الاتصال وأعد المحاولة.', 'warning'); }
   };
 
   const handleSaveProfileChanges = async () => {
-    if (editFormName.trim()) {
-      await updateProfileName(editFormName.trim());
-    }
-    if (editFormAvatar) {
-      await updateProfilePhoto(editFormAvatar);
-    }
-    await updatePreferences({
-      defaultServings: Number(editFormServings) || 4,
-      favoriteCuisines: editFormCuisines,
-    });
-    setIsEditProfileModalOpen(false);
-    showToast('🎉 تم حفظ وتحديث بيانات وملف الحساب بنجاح!', 'success');
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      await updateProfileDetails({
+        displayName: editFormName.trim() || user?.displayName || 'طاهٍ مبدع',
+        ...(editFormAvatar ? { photoURL: editFormAvatar } : {}),
+        preferences: { defaultServings: Number(editFormServings) || 4, favoriteCuisines: editFormCuisines },
+      });
+      setIsEditProfileModalOpen(false);
+      showToast('تم حفظ الاسم والصورة والتفضيلات على حسابك.', 'success');
+    } catch { showToast('لم يتأكد حفظ الملف. تحقق من الاتصال وأعد المحاولة.', 'warning'); }
+    finally { setIsSubmitting(false); }
+  };
+
+  const handleLogout = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try { await flushPendingChanges(); await logout(); }
+    catch { showToast('لم نسجل خروجك لأن الحفظ لم يكتمل. أعد محاولة الحفظ أولاً.', 'warning'); }
+    finally { setIsSubmitting(false); }
   };
 
   const handleAvatarFile = async (file?: File) => {
@@ -457,11 +469,12 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               </div>
             ) : (
               <button
-                onClick={logout}
+                onClick={handleLogout}
+                disabled={isSubmitting}
                 className="px-3.5 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold text-xs flex items-center gap-1.5 transition-colors"
               >
                 <LogOut className="w-4 h-4 text-rose-500" />
-                تسجيل الخروج
+                {isSubmitting ? 'جاري حفظ آخر التعديلات…' : 'حفظ التعديلات وتسجيل الخروج'}
               </button>
             )}
           </div>
