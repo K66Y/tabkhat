@@ -6,7 +6,8 @@ import {
   DifficultyLevel,
   IngredientCategory,
 } from '../types/recipe';
-import { parseVoiceRecipe as parseArabicRecipeLocally } from '../utils/voiceRecipeParser';
+import { parseVoiceRecipe as parseArabicRecipeLocally, stepsFromDescription } from '../utils/voiceRecipeParser';
+import { requiredRecipeFields, type NumericField } from '../utils/recipeFormValidation';
 import type { ParsedIngredient } from '../utils/arabicRecipeParser';
 import {
   X,
@@ -105,10 +106,12 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
   const [category, setCategory] = useState<RecipeCategory>('أطباق رئيسية');
   const [cuisine, setCuisine] = useState('سعودي');
   const [difficulty, setDifficulty] = useState<DifficultyLevel>('سهل');
-  const [prepTime, setPrepTime] = useState<number>(15);
-  const [cookTime, setCookTime] = useState<number>(25);
-  const [baseServings, setBaseServings] = useState<number>(4);
-  const [calories, setCalories] = useState<number>(350);
+  const [prepTime, setPrepTime] = useState<NumericField>('');
+  const [cookTime, setCookTime] = useState<NumericField>('');
+  const [baseServings, setBaseServings] = useState<NumericField>('');
+  const [calories, setCalories] = useState<NumericField>('');
+  const missingFields = requiredRecipeFields(prepTime, cookTime, baseServings);
+  const metricClass = (invalid: boolean) => `w-full py-2 px-1 text-center font-bold text-sm rounded-xl border shadow-2xs focus:outline-none focus:ring-2 focus:ring-[#E26D46]/40 ${invalid ? 'bg-rose-50 border-rose-500 text-rose-800' : 'bg-white border-stone-200'}`;
   const [imageUrl, setImageUrl] = useState(PRESET_IMAGES[0].url);
   const [customImageUrlInput, setCustomImageUrlInput] = useState('');
   const [showUrlInput, setShowUrlInput] = useState(false);
@@ -141,10 +144,10 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
       setCategory(recipeToEdit.category || 'أطباق رئيسية');
       setCuisine(recipeToEdit.cuisine || 'سعودي');
       setDifficulty(recipeToEdit.difficulty || 'سهل');
-      setPrepTime(recipeToEdit.prepTime || 15);
-      setCookTime(recipeToEdit.cookTime || 25);
-      setBaseServings(recipeToEdit.baseServings || 4);
-      setCalories(recipeToEdit.calories || 350);
+      setPrepTime(recipeToEdit.prepTime ?? '');
+      setCookTime(recipeToEdit.cookTime ?? '');
+      setBaseServings(recipeToEdit.baseServings ?? '');
+      setCalories(recipeToEdit.calories || '');
       setImageUrl(recipeToEdit.imageUrl || PRESET_IMAGES[0].url);
 
       if (recipeToEdit.ingredients && recipeToEdit.ingredients.length > 0) {
@@ -174,10 +177,10 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
       setCategory('أطباق رئيسية');
       setCuisine('سعودي');
       setDifficulty('سهل');
-      setPrepTime(15);
-      setCookTime(25);
-      setBaseServings(4);
-      setCalories(350);
+      setPrepTime('');
+      setCookTime('');
+      setBaseServings('');
+      setCalories('');
       setImageUrl(PRESET_IMAGES[0].url);
       setIngredients([
         { id: '1', name: '', amount: 1, unit: 'كوب', category: 'معلبات ومؤونة' },
@@ -280,7 +283,7 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
     if (!recognitionRef.current) {
       const simulatedText = window.prompt(
         mode === 'description'
-          ? 'المتصفح لا يدعم الميكروفون المباشر. اكتب وصف الطبخة وسيُضاف إلى خانة الوصف فقط:'
+          ? 'المتصفح لا يدعم الميكروفون المباشر. اكتب وصف الطبخة وطريقة التحضير لإضافتهما إلى الوصف والخطوات:'
           : 'المتصفح لا يدعم الميكروفون المباشر. اكتب أو الصق الوصفة والمقادير وسيقوم النظام بتعبئة الخانات تلقائياً:',
         mode === 'description'
           ? 'طبق شهي بنكهة منزلية غنية ومذاق متوازن...'
@@ -323,7 +326,7 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
         recognitionRef.current.start();
         showToast(
           mode === 'description'
-            ? 'جاري تسجيل وصف الطبخة فقط...'
+            ? 'جاري تسجيل الوصف وطريقة التحضير...'
             : 'جاري الاستماع... اذكر اسم الوصفة والمقادير والكميات والخطوات.',
           'info'
         );
@@ -422,11 +425,22 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
     }
   };
 
+  const addStepsFromDescription = (text: string) => {
+    const extracted = stepsFromDescription(text);
+    if (extracted.length) setSteps(current => {
+      const existing = current.filter(step => step.instruction.trim());
+      const added = extracted.filter(step => !existing.some(s => s.instruction.trim() === step.instruction.trim()));
+      return [...existing, ...added].map((step, index) => ({ ...step, stepNumber: index + 1 }));
+    });
+    return extracted.length;
+  };
+
   finishRecordingRef.current = (mode, text) => {
     if (mode === 'description') {
       setDescription((current) => [current.trim(), text.trim()].filter(Boolean).join(' '));
       setDescriptionTranscript(text.trim());
-      showToast('تمت إضافة التسجيل إلى وصف الطبخة فقط.', 'success');
+      const count = addStepsFromDescription(text);
+      showToast(count ? `تم حفظ الوصف واستخراج ${count} خطوات تحضير منه.` : 'تمت إضافة الوصف؛ لم يتضمن خطوات تحضير واضحة.', 'success');
       return;
     }
     setTranscript(text.trim());
@@ -508,10 +522,6 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
 
   // Remove step row
   const removeStepRow = (idx: number) => {
-    if (steps.length <= 1) {
-      showToast('يجب أن تحتوي الوصفة على خطوة تحضير واحدة على الأقل', 'warning');
-      return;
-    }
     const updated = steps.filter((_, i) => i !== idx);
     setSteps(updated.map((s, i) => ({ ...s, stepNumber: i + 1 })));
   };
@@ -522,6 +532,15 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
 
     if (isRecording || isDescriptionRecording || isAnalyzing) {
       showToast('انتظر انتهاء التسجيل والتحليل قبل حفظ الوصفة.', 'warning');
+      return;
+    }
+    if (Object.values(missingFields).some(Boolean)) {
+      document.getElementById(missingFields.prepTime ? 'recipe-prep-time' : missingFields.cookTime ? 'recipe-cook-time' : 'recipe-servings')?.focus();
+      showToast('أكمل وقت التحضير ووقت الطبخ وعدد الأشخاص في الخانات الحمراء. يمكن كتابة صفر إذا لم تتطلب الوصفة طبخًا.', 'warning');
+      return;
+    }
+    if (calories !== '' && (!Number.isFinite(calories) || calories < 0)) {
+      showToast('اكتب سعرات صحيحة أو اتركها فارغة.', 'warning');
       return;
     }
     const needsQuantity = ingredients.find(i => i.name.trim() && (!Number.isFinite(Number(i.amount)) || Number(i.amount) <= 0));
@@ -558,10 +577,6 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
         timerMinutes: s.timerMinutes ? Number(s.timerMinutes) : undefined,
       }));
 
-    if (validSteps.length === 0) {
-      showToast('الرجاء كتابة خطوة تحضير واحدة على الأقل', 'warning');
-      return;
-    }
 
     if (recipeToEdit) {
       updateRecipe(recipeToEdit.id, {
@@ -569,11 +584,11 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
         description: description.trim() || 'وصفة خاصة لذيذة ومبتكرة مضافة في دفتر وصفاتي.',
         category,
         cuisine: cuisine.trim() || 'سعودي',
-        prepTime: Number(prepTime) || 15,
-        cookTime: Number(cookTime) || 25,
+        prepTime: Number(prepTime),
+        cookTime: Number(cookTime),
         difficulty,
-        baseServings: Number(baseServings) || 4,
-        calories: Number(calories) || 350,
+        baseServings: Number(baseServings),
+        calories: Number(calories) || 0,
         imageUrl,
         ingredients: validIngredients,
         steps: validSteps,
@@ -587,11 +602,11 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
       description: description.trim() || 'وصفة خاصة لذيذة ومبتكرة مضافة في دفتر وصفاتي.',
       category,
       cuisine: cuisine.trim() || 'سعودي',
-      prepTime: Number(prepTime) || 15,
-      cookTime: Number(cookTime) || 25,
+      prepTime: Number(prepTime),
+      cookTime: Number(cookTime),
       difficulty,
-      baseServings: Number(baseServings) || 4,
-      calories: Number(calories) || 350,
+      baseServings: Number(baseServings),
+      calories: Number(calories) || 0,
       imageUrl,
       ingredients: validIngredients,
       steps: validSteps,
@@ -869,7 +884,7 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
                 ) : (
                   <>
                     <Mic className="w-3.5 h-3.5" />
-                    <span>تسجيل الوصف فقط</span>
+                    <span>تسجيل الوصف والخطوات</span>
                   </>
                 )}
               </button>
@@ -878,9 +893,11 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
               rows={2}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
+              onBlur={() => addStepsFromDescription(description)}
               placeholder="وصف شهي ومختصر للطبخة ونكهاتها المميزة..."
               className="w-full px-4 py-2 rounded-2xl bg-white border border-stone-200/90 text-xs sm:text-sm text-[#242A26] placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-[#E26D46]/40 shadow-2xs text-right resize-none"
             />
+            <p className="text-xs text-stone-500">اذكر طريقة التحضير في الوصف لتُضاف خطواتها تلقائيًا. الخطوات اختيارية ولا تغيّر المقادير.</p>
             {descriptionTranscript && (
               <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-stone-700">
                 <span className="font-bold text-emerald-800">نص الوصف الملتقط: </span>
@@ -944,51 +961,73 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
           </div>
 
           {/* ⏱️ 4 Metrics (Prep Time, Cook Time, Servings, Calories) */}
-          <div className="grid grid-cols-4 gap-2 text-center">
+          <p className="text-sm font-semibold text-rose-700">وقت التحضير ووقت الطبخ وعدد الأشخاص مطلوبة. أدخل 0 للوقت إذا كانت الوصفة لا تحتاجه.</p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
             {/* Prep Time */}
             <div className="space-y-1">
-              <span className="block text-[11px] font-bold text-stone-600">التحضير (د)</span>
+              <label htmlFor="recipe-prep-time" className="block text-xs font-bold text-stone-600">التحضير (د) *</label>
               <input
+                id="recipe-prep-time"
                 type="number"
-                min={1}
+                min={0}
+                step="any"
+                required
+                aria-invalid={missingFields.prepTime}
+                placeholder="أدخل الدقائق"
                 value={prepTime}
-                onChange={(e) => setPrepTime(Number(e.target.value) || 0)}
-                className="w-full py-2 px-1 text-center font-bold text-xs sm:text-sm rounded-xl bg-white border border-stone-200/90 shadow-2xs focus:outline-none focus:ring-2 focus:ring-[#E26D46]/40"
+                onChange={(e) => setPrepTime(e.target.value === '' ? '' : Number(e.target.value))}
+                className={metricClass(missingFields.prepTime)}
               />
+              {missingFields.prepTime && <p className="text-xs text-rose-700">أدخل وقت التحضير</p>}
             </div>
 
             {/* Cook Time */}
             <div className="space-y-1">
-              <span className="block text-[11px] font-bold text-stone-600">الطبخ (د)</span>
+              <label htmlFor="recipe-cook-time" className="block text-xs font-bold text-stone-600">الطبخ (د) *</label>
               <input
+                id="recipe-cook-time"
                 type="number"
                 min={0}
+                step="any"
+                required
+                aria-invalid={missingFields.cookTime}
+                placeholder="أدخل الدقائق"
                 value={cookTime}
-                onChange={(e) => setCookTime(Number(e.target.value) || 0)}
-                className="w-full py-2 px-1 text-center font-bold text-xs sm:text-sm rounded-xl bg-white border border-stone-200/90 shadow-2xs focus:outline-none focus:ring-2 focus:ring-[#E26D46]/40"
+                onChange={(e) => setCookTime(e.target.value === '' ? '' : Number(e.target.value))}
+                className={metricClass(missingFields.cookTime)}
               />
+              {missingFields.cookTime && <p className="text-xs text-rose-700">أدخل وقت الطبخ</p>}
             </div>
 
             {/* Servings */}
             <div className="space-y-1">
-              <span className="block text-[11px] font-bold text-stone-600">الأشخاص</span>
+              <label htmlFor="recipe-servings" className="block text-xs font-bold text-stone-600">الأشخاص *</label>
               <input
+                id="recipe-servings"
                 type="number"
                 min={1}
+                step={1}
+                required
+                aria-invalid={missingFields.servings}
+                placeholder="عدد الأشخاص"
                 value={baseServings}
-                onChange={(e) => setBaseServings(Number(e.target.value) || 1)}
-                className="w-full py-2 px-1 text-center font-bold text-xs sm:text-sm rounded-xl bg-white border border-stone-200/90 shadow-2xs focus:outline-none focus:ring-2 focus:ring-[#E26D46]/40"
+                onChange={(e) => setBaseServings(e.target.value === '' ? '' : Number(e.target.value))}
+                className={metricClass(missingFields.servings)}
               />
+              {missingFields.servings && <p className="text-xs text-rose-700">أدخل عددًا صحيحًا أكبر من صفر</p>}
             </div>
 
             {/* Calories (Leftmost in RTL) */}
             <div className="space-y-1">
-              <span className="block text-[11px] font-bold text-stone-600">السعرات</span>
+              <label htmlFor="recipe-calories" className="block text-xs font-bold text-stone-600">السعرات (اختياري)</label>
               <input
+                id="recipe-calories"
                 type="number"
                 min={0}
+                step="any"
+                placeholder="اختياري"
                 value={calories}
-                onChange={(e) => setCalories(Number(e.target.value) || 0)}
+                onChange={(e) => setCalories(e.target.value === '' ? '' : Number(e.target.value))}
                 className="w-full py-2 px-1 text-center font-bold text-xs sm:text-sm rounded-xl bg-white border border-stone-200/90 shadow-2xs focus:outline-none focus:ring-2 focus:ring-[#E26D46]/40"
               />
             </div>
@@ -1180,7 +1219,7 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
             <div className="flex items-center justify-between">
               {/* Right: Section Title */}
               <h3 className="font-heading font-bold text-xs sm:text-sm text-[#242A26] flex items-center gap-1">
-                <span>خطوات التحضير ({steps.length})</span>
+                <span>خطوات التحضير — اختياري ({steps.filter(step => step.instruction.trim()).length})</span>
                 <span>👨‍🍳</span>
               </h3>
 

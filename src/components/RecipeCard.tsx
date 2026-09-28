@@ -104,7 +104,7 @@ export const RecipeCard: React.FC<RecipeCardProps> = ({
           {/* Calories */}
           <div className="flex items-center gap-1">
             <Flame className="w-3.5 h-3.5 text-[#E26D46]" />
-            <span>{recipe.calories || 350} ك.س</span>
+            <span>{recipe.calories > 0 ? `${recipe.calories} ك.س` : 'السعرات غير محددة'}</span>
           </div>
 
           {/* Servings */}

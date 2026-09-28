@@ -336,7 +336,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                   <span>•</span>
                   <div className="flex items-center gap-1">
                     <Flame className="w-3.5 h-3.5 text-amber-400" />
-                    <span>{mealOfTheDay.calories || 580} ك.س</span>
+                    <span>{mealOfTheDay.calories > 0 ? `${mealOfTheDay.calories} ك.س` : 'السعرات غير محددة'}</span>
                   </div>
                 </div>
 

@@ -195,7 +195,7 @@ export const WeeklyPlanner: React.FC<WeeklyPlannerProps> = ({ onSelectRecipe }) 
                           {recipe.cookTime + recipe.prepTime} د
                         </span>
                         <span>•</span>
-                        <span>{recipe.calories} سعرة</span>
+                        <span>{recipe.calories > 0 ? `${recipe.calories} سعرة` : 'السعرات غير محددة'}</span>
                       </div>
                     </div>
                   </div>

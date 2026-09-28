@@ -330,7 +330,7 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
             <div className="flex flex-col items-center border-r border-stone-100">
               <span className="text-xs font-bold text-[#E26D46] mb-1">🔥</span>
               <span className="text-[11px] text-stone-500 font-medium">السعرات</span>
-              <span className="text-xs sm:text-sm font-bold text-[#242A26]">{recipe.calories || 350}</span>
+              <span className="text-xs sm:text-sm font-bold text-[#242A26]">{recipe.calories > 0 ? recipe.calories : 'غير محددة'}</span>
             </div>
           </div>
 

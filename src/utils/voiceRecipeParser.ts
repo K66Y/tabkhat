@@ -31,6 +31,18 @@ export function isIngredientName(name: string): boolean {
     && !/[\d،,:;\\/]/.test(text);
 }
 
+/** Keep the spoken instructions themselves; descriptive praise is not a step. */
+export function stepsFromDescription(input: string): ParsedRecipeOutput['steps'] {
+  const action = /(?:^|\s)(?:و)?(?:نغسل|اغسل|اغسلي|غسلت|نقطع|قطع|قطعي|قطعت|نفرم|افرمي|فرمت|نخلط|اخلط|اخلطي|خلطت|نضيف|اضيف|اضيفي|اضفت|ضفت|نحط|حط|حطي|حطيت|نسخن|سخن|سخني|سخنت|نقلي|اقلي|قليت|نشوح|شوح|شوحي|شوحت|نطبخ|اطبخ|اطبخي|طبخت|نسلق|اسلق|اسلقي|سلقت|نترك|اترك|اتركي|تركت|ندخل|ادخل|ادخلي|دخلت|نخبز|اخبز|اخبزي|خبزت|نقدم|قدم|قدمي|قدمت|نتبل|تبل|تبلي|تبلت|نغطي|غطي|غطيت)(?:ها|هم|ه)?(?=\s|$)/;
+  return input.trim().replace(/^(?:طريقة التحضير|خطوات التحضير|الطريقة)\s*[:：]?\s*/, '')
+    .split(/\s*(?:[،,؛\n]|\.(?!\d)|(?:^|\s)(?:ثم|بعدين|بعد ذلك|اول شي|أول شي|اولا|أولاً)\s+)\s*/)
+    .map(s => s.trim()).filter(s => action.test(normalize(s)))
+    .map((instruction, index) => {
+      const time = normalize(instruction).match(new RegExp(`(${quantity})\\s*(دقيقة|دقائق|ساعة)`));
+      return { stepNumber: index + 1, instruction, ...(time ? { timerMinutes: value(time[1]) * (time[2] === 'ساعة' ? 60 : 1) } : {}) };
+    });
+}
+
 export function parseVoiceIngredient(input: string, index: number): ParsedIngredient | null {
   let text = normalize(input).replace(/^\s*[-•*]\s*/, '').trim();
   text = text.replace(new RegExp(`^(?:و\\s*)?(?:${addition}|مع|المقادير|المكونات)\\s*[:：]?\\s*`), '').trim();

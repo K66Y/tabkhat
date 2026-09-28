@@ -271,7 +271,7 @@ export const FridgeIngredientSelector: React.FC<FridgeIngredientSelectorProps> =
                           <span>•</span>
                           <span className="flex items-center gap-0.5 text-amber-600">
                             <Flame className="w-3 h-3" />
-                            {recipe.calories} سعرة
+                            {recipe.calories > 0 ? `${recipe.calories} سعرة` : 'السعرات غير محددة'}
                           </span>
                         </div>
                       </div>
