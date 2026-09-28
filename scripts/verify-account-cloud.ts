@@ -7,6 +7,7 @@ import { getFirestore, doc, getDocFromServer, deleteDoc, setDoc, terminate } fro
 import config from '../firebase-applet-config.json';
 import { commitAccountData, loadAccountSnapshot } from '../src/lib/firebaseAccountData';
 import { DataConflictError, type UserDataSnapshot } from '../src/lib/accountData';
+import { verifyAccount } from '../server/verifyAccount';
 
 if (process.env.TABKHAT_LIVE_TEST !== '1') throw new Error('Set TABKHAT_LIVE_TEST=1 to create disposable test accounts.');
 const apps = [0, 1, 2].map(i => initializeApp(config, `verify-${randomUUID()}-${i}`));
@@ -22,6 +23,24 @@ try {
   testUids.push(a.user.uid);
   await setDoc(doc(databases[0], 'users', a.user.uid), { uid: a.user.uid, displayName: 'اختبار حفظ طبخات' });
   console.log('PASS email registration');
+  const token = await a.user.getIdToken();
+  assert.equal(await verifyAccount(`Bearer ${token}`), a.user.uid);
+  assert.equal(await verifyAccount('Bearer not-a-valid-token'), null);
+  console.log('PASS API accepts a valid Firebase session and rejects a forged token');
+  if (process.env.TABKHAT_TEST_API === '1') {
+    const denied = await fetch('https://tabkhat.vercel.app/api/parse-recipe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: '3 كاسات ماء' }) });
+    assert.equal(denied.status, 401);
+    const response = await fetch('https://tabkhat.vercel.app/api/parse-recipe', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ text: 'طبخت كبسة دجاج حطيت ثلاث كاسات موية على أربع كاسات رز حطيت ربع ملعقة ملح وحطيت حبة فلفل رومي' }),
+      signal: AbortSignal.timeout(30000),
+    });
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.equal(result.success, true);
+    assert.equal(result.recipe.ingredients.length, 4);
+    console.log(`PASS deployed voice API: authenticated request, four ingredients, analysis mode=${result.recipe.analysisMode}`);
+  }
   const local = { ...base, favorites: ['test-recipe'], shoppingList: [{ id: 'test-item', name: 'أرز اختبار', category: 'أخرى' as const, completed: false, addedAt: 1 }] };
   await commitAccountData(databases[0], a.user.uid, { base, local }, base);
   await signOut(auths[0]);

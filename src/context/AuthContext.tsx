@@ -81,7 +81,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const loginWithGoogle = async () => {
     // Opening the popup directly in the click event keeps Safari's user gesture.
-    await signInWithPopup(auth, googleProvider);
+    await withTimeout(signInWithPopup(auth, googleProvider), 45000);
   };
   const loginWithEmail = async (email: string, pass: string) => {
     await withTimeout(signInWithEmailAndPassword(auth, email.trim().toLowerCase(), pass), 15000);

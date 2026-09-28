@@ -1,4 +1,4 @@
-import config from '../firebase-applet-config.json';
+import config from '../firebase-applet-config.json' with { type: 'json' };
 
 // Firebase verifies the token remotely; no service-account key is exposed or needed.
 export async function verifyAccount(authorization: string | undefined): Promise<string | null> {

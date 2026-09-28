@@ -32,10 +32,6 @@ export default async function handler(req: Request, res: Response) {
       return res.status(200).json({ success: true, recipe });
     }
 
-    if (url.includes('/api/health')) {
-      return res.status(200).json({ status: 'ok', app: 'Tabkhat App API' });
-    }
-
     return res.status(404).json({ error: 'Endpoint not found' });
   } catch (err: any) {
     console.error('API Handler Error:', err?.name || 'UnknownError');
