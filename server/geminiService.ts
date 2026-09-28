@@ -1,4 +1,5 @@
 import { GoogleGenAI, Type } from '@google/genai';
+import { parseVoiceRecipe } from '../src/utils/voiceRecipeParser.ts';
 
 // Initialize the Google Gen AI client with environment key
 const apiKey = process.env.GEMINI_API_KEY || '';
@@ -29,10 +30,10 @@ export interface ParsedRecipeResult {
   tags: string[];
 }
 
-export async function parseRecipeFromSpokenText(spokenText: string): Promise<ParsedRecipeResult> {
+export async function parseRecipeFromSpokenText(spokenText: string) {
   if (!ai || !apiKey) {
     // High quality intelligent heuristic fallback if API key is not configured
-    return fallbackParseSpokenText(spokenText);
+    return parseVoiceRecipe(spokenText);
   }
 
   const prompt = `أنت شيف وخبير طهي محترف ومحلل وصفات ذكي لتطبيق "طبخات".
@@ -49,7 +50,8 @@ export async function parseRecipeFromSpokenText(spokenText: string): Promise<Par
 7. تحديد عدد الحصص (baseServings - رقم مثل 4) والسعرات التقريبية للحصة (calories).
 8. استخراج كل المقادير بدقة مع تقسيمها إلى: name (اسم المكون فقط بدون كمية)، amount (رقم مثل 1 أو 2 أو 0.5)، unit (الوحدة مثل كوب، ملعقة كبيرة، حبة، جرام، كيلو، رشة)، category (من: خضار وفواكه، لحوم ودواجن، توابل وبهارات، معلبات ومؤونة، ألبان وأجبان، أخرى).
 9. ترتيب خطوات التحضير رقمياً بنظام متسلسل وواضح، وإذا كانت أي خطوة تتطلب وقتاً (مثل "اتركه يغلي 20 دقيقة" أو "حمره 10 دقائق") ضع timerMinutes بدقة.
-10. اختر صورة طعام مناسبة جداً وشهية من unsplash عالية الجودة للطعام المطبوخ.`;
+10. لا تغيّر صورة المستخدم ولا تخترع روابط صور.
+قواعد ملزمة: استخرج المقادير والكميات والخطوات المذكورة فقط. لا تضف مكونات أو خطوات عامة أو بدائل غير مذكورة. اترك مصفوفة المقادير أو الخطوات فارغة عند غيابها. الوصف له تسجيل مستقل فلا تضع الإملاء في الوصف. لا تخترع وقتًا أو سعرات أو حصصًا: استخدم 0 للأرقام غير المذكورة وسلسلة فارغة للنصوص غير المذكورة.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -127,7 +129,7 @@ export async function parseRecipeFromSpokenText(spokenText: string): Promise<Par
     return parsed as ParsedRecipeResult;
   } catch (err) {
     console.error('Gemini recipe parse error, using heuristic fallback:', err);
-    return fallbackParseSpokenText(spokenText);
+    return parseVoiceRecipe(spokenText);
   }
 }
 
@@ -212,38 +214,6 @@ ${ingredientsList.join('، ')}
   }
 }
 
-// Heuristic fallback for offline / mock resilience
-function fallbackParseSpokenText(text: string): ParsedRecipeResult {
-  const clean = text.trim();
-  const words = clean.split(/\s+/);
-  const title = words.slice(0, 5).join(' ') || 'طبخة بيت شهية';
-
-  return {
-    title: title.startsWith('سويت') || title.startsWith('طريقة') ? title : `طريقة إعداد ${title}`,
-    description: `وصفة مستوحاة من الإملاء الصوتي: "${clean.slice(0, 80)}..." تم تنسيقها بعناية.`,
-    category: clean.includes('حلا') || clean.includes('سكر') ? 'حلا وحلويات' : clean.includes('شوربة') ? 'شوربات' : 'أطباق رئيسية',
-    cuisine: clean.includes('كبسة') || clean.includes('مندي') ? 'سعودي' : 'عربي',
-    prepTime: 15,
-    cookTime: 30,
-    difficulty: 'سهل',
-    baseServings: 4,
-    calories: 420,
-    imageUrl: 'https://images.unsplash.com/photo-1555939594-58d7cb561ad1?auto=format&fit=crop&w=1200&q=80',
-    tags: ['إملاء صوتي', 'طبخ منزلي', 'سريع'],
-    ingredients: [
-      { name: 'المكون الرئيسي المستخرج من الصوت', amount: 500, unit: 'جرام', category: 'لحوم ودواجن' },
-      { name: 'بصل وثوم مفروم', amount: 1, unit: 'حبة', category: 'خضار وفواكه' },
-      { name: 'توابل مشكلة وملح', amount: 1, unit: 'ملعقة صغيرة', category: 'توابل وبهارات' },
-      { name: 'زيت أو سمن', amount: 2, unit: 'ملعقة كبيرة', category: 'معلبات ومؤونة' },
-    ],
-    steps: [
-      { stepNumber: 1, instruction: 'تجهيز المكونات وغسلها جيداً كما تم سردها في التسجيل الصوتي.', timerMinutes: 5 },
-      { stepNumber: 2, instruction: 'تسخين القدر وتشويح المكونات على نار متوسطة حتى تمتزج النكهات.', timerMinutes: 10 },
-      { stepNumber: 3, instruction: 'إضافة المرق أو الماء والبهارات وتركها تنضج على نار هادئة.', timerMinutes: 20 },
-      { stepNumber: 4, instruction: 'سكب الطبخة في طبق التقديم وتقديمها ساخنة بالهناء والعافية.' },
-    ],
-  };
-}
 
 function fallbackFridgeRecipe(ingredientsList: string[]): ParsedRecipeResult {
   const mainIng = ingredientsList[0] || 'الخضار المتوفرة';

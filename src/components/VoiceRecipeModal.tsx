@@ -6,7 +6,7 @@ import {
   DifficultyLevel,
   IngredientCategory,
 } from '../types/recipe';
-import { parseArabicRecipeLocally } from '../utils/arabicRecipeParser';
+import { parseVoiceRecipe as parseArabicRecipeLocally } from '../utils/voiceRecipeParser';
 import {
   X,
   Plus,
@@ -195,6 +195,7 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
   const [transcript, setTranscript] = useState('');
   const [descriptionTranscript, setDescriptionTranscript] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState('');
   const recognitionRef = useRef<any>(null);
   const recordingModeRef = useRef<'recipe' | 'description' | null>(null);
   const capturedTextRef = useRef('');
@@ -223,14 +224,29 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
             setDescriptionTranscript(cleanText);
           } else {
             setTranscript(cleanText);
+            // Populate stable recognized speech immediately, without waiting
+            // for the browser to end the microphone session.
+            const finalText = Array.from(event.results as ArrayLike<any>)
+              .filter((result: any) => result.isFinal)
+              .map((result: any) => result[0].transcript).join(' ');
+            if (finalText.trim()) {
+              const parsed = parseArabicRecipeLocally(finalText);
+              if (parsed.title) setTitle(parsed.title);
+              if (parsed.ingredients.length) setIngredients(parsed.ingredients);
+              if (parsed.steps.length) setSteps(parsed.steps);
+              if (parsed.category) setCategory(parsed.category);
+              if (parsed.prepTime) setPrepTime(parsed.prepTime);
+              if (parsed.cookTime) setCookTime(parsed.cookTime);
+              if (parsed.baseServings) setBaseServings(parsed.baseServings);
+            }
           }
         };
 
         recognition.onerror = (event: any) => {
           console.warn('Speech recognition error:', event.error);
+          setVoiceStatus(event.error === 'not-allowed' ? 'اسمح للمتصفح باستخدام الميكروفون ثم حاول مجددًا.' : 'توقف الاستماع. يمكنك تعديل النص الملتقط وتوزيعه أو المحاولة مجددًا.');
           setIsRecording(false);
           setIsDescriptionRecording(false);
-          recordingModeRef.current = null;
         };
 
         recognition.onend = () => {
@@ -241,10 +257,18 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
           setIsDescriptionRecording(false);
           if (mode && capturedText) {
             finishRecordingRef.current(mode, capturedText);
+          } else if (mode) {
+            setVoiceStatus('لم يصل كلام واضح. تحقق من الميكروفون أو اكتب النص أدناه.');
           }
         };
 
         recognitionRef.current = recognition;
+        return () => {
+          recognition.onend = null;
+          recognition.onresult = null;
+          recognition.onerror = null;
+          recognition.abort();
+        };
       }
     }
   }, []);
@@ -270,7 +294,13 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
       (mode === 'description' && isDescriptionRecording);
 
     if (isCurrentModeRecording) {
+      const text = capturedTextRef.current.trim();
+      recordingModeRef.current = null;
       recognitionRef.current.stop();
+      setIsRecording(false);
+      setIsDescriptionRecording(false);
+      if (text) finishRecordingRef.current(mode, text);
+      else setVoiceStatus('لم يصل كلام واضح. حاول مجددًا أو اكتب النص أدناه.');
     } else {
       try {
         if (isRecording || isDescriptionRecording) {
@@ -278,6 +308,7 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
           return;
         }
         recordingModeRef.current = mode;
+        setVoiceStatus('');
         capturedTextRef.current = '';
         if (mode === 'description') {
           setDescriptionTranscript('');
@@ -309,7 +340,13 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
 
     // 1. Instantly parse locally using intelligent Arabic extractor
     const localResult = parseArabicRecipeLocally(text);
-    if (localResult.title && !title) setTitle(localResult.title);
+    if (localResult.title) setTitle(localResult.title);
+    if (localResult.category) setCategory(localResult.category);
+    if (localResult.prepTime) setPrepTime(localResult.prepTime);
+    if (localResult.cookTime) setCookTime(localResult.cookTime);
+    if (localResult.baseServings) setBaseServings(localResult.baseServings);
+    let ingredientCount = localResult.ingredients.length;
+    let stepCount = localResult.steps.length;
 
     if (localResult.ingredients && localResult.ingredients.length > 0) {
       setIngredients(localResult.ingredients);
@@ -325,6 +362,7 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text }),
+        signal: AbortSignal.timeout(10000),
       });
       if (res.ok) {
         const data = await res.json();
@@ -338,9 +376,9 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
           if (r.baseServings) setBaseServings(Number(r.baseServings));
           if (r.calories) setCalories(Number(r.calories));
           if (r.difficulty) setDifficulty(r.difficulty as DifficultyLevel);
-          if (r.imageUrl) setImageUrl(String(r.imageUrl));
 
           if (Array.isArray(r.ingredients) && r.ingredients.length > 0) {
+            ingredientCount = r.ingredients.length;
             setIngredients(
               r.ingredients.map((ing: any, i: number) => ({
                 id: 'ing-' + (i + 1),
@@ -353,6 +391,7 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
           }
 
           if (Array.isArray(r.steps) && r.steps.length > 0) {
+            stepCount = r.steps.length;
             setSteps(
               r.steps.map((st: any, i: number) => ({
                 stepNumber: i + 1,
@@ -363,11 +402,14 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
           }
         }
       }
-      showToast('✨ تم توزيع وفرز المقادير والأعداد في الخانات بنجاح!', 'success');
     } catch {
-      // Local extraction succeeded and populated all inputs
-      showToast('✨ تم تفريغ وتوزيع المقادير والأعداد في الخانات بنجاح!', 'success');
+      // Keep the actual locally extracted fields if the service is unavailable.
     } finally {
+      const message = ingredientCount || stepCount
+        ? `تمت تعبئة ${ingredientCount} مقادير و${stepCount} خطوات. راجع الخانات والكميات قبل الحفظ.`
+        : 'لم أستخرج مقادير واضحة. اكتب مثلًا: كوبين رز، نصف كيلو دجاج، ملعقة صغيرة ملح، ثم اضغط تعبئة الخانات.';
+      setVoiceStatus(message);
+      showToast(message, ingredientCount || stepCount ? 'success' : 'warning');
       setIsAnalyzing(false);
     }
   };
@@ -646,12 +688,20 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
             )}
 
             {/* Transcript Preview */}
-            {transcript && !isAnalyzing && (
-              <div className="mt-3 p-2.5 rounded-xl bg-white/80 border border-orange-200 text-xs text-stone-700">
-                <span className="font-bold text-[#E26D46]">النص الملتقط: </span>
-                {transcript}
-              </div>
-            )}
+            <div className="mt-3 space-y-2">
+              <label htmlFor="voice-transcript" className="text-xs font-bold">النص الملتقط — يمكنك تصحيحه قبل التعبئة</label>
+              <textarea id="voice-transcript" rows={3} value={transcript} disabled={isRecording || isAnalyzing}
+                onChange={(event) => setTranscript(event.target.value)}
+                placeholder="اسم الوصفة كبسة دجاج، المقادير كوبين رز ونصف كيلو دجاج وملعقة صغيرة ملح، الطريقة نغسل الرز ثم نطبخ لمدة 30 دقيقة"
+                className="w-full rounded-xl border border-orange-200 bg-white p-3 text-xs" />
+              <button type="button" disabled={!transcript.trim() || isRecording || isAnalyzing}
+                onClick={() => void handleAnalyzeWithAI(transcript)}
+                className="rounded-xl bg-[#2D5A46] px-4 py-2 text-xs font-bold text-white disabled:opacity-50">تعبئة الخانات من النص</button>
+              {voiceStatus && <p role="status" className="text-xs font-semibold text-stone-700">{voiceStatus}</p>}
+              {!!ingredients.filter(i => i.name.trim()).length && <div className="rounded-xl bg-white p-3 text-xs" aria-label="معاينة المقادير المستخرجة">
+                {ingredients.filter(i => i.name.trim()).map(i => <p key={i.id}>{i.name} — {i.amount} {i.unit} — {i.category}</p>)}
+              </div>}
+            </div>
           </div>
 
           {/* 📷 Image Section (Matches IMG_2071) */}
