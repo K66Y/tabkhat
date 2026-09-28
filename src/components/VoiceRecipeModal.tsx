@@ -1071,8 +1071,8 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
                   <div className="col-span-2">
                     <input
                       type="number"
-                      min={0.1}
-                      step={0.5}
+                      min={0.001}
+                      step="any"
                       value={ing.amount}
                       onChange={(e) => {
                         const val = Number(e.target.value) || 0;
@@ -1108,6 +1108,7 @@ export const VoiceRecipeModal: React.FC<VoiceRecipeModalProps> = ({
                       <option value="علبة">علبة</option>
                       <option value="لتر">لتر</option>
                       <option value="مل">مل</option>
+                      <option value="قطعة">قطعة</option>
                     </select>
                   </div>
 
